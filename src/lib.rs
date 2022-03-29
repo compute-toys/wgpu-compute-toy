@@ -36,18 +36,32 @@ pub struct State {
     height: u32
 }
 
-
 static SHARED_STATE: Lazy<Mutex<State>> = Lazy::new(|| Mutex::new(State { shader: String::from(" "), width: 1280, height: 720 }));
-
+static DIRTY_FLAG: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false ));
 
 #[wasm_bindgen]
 pub fn get_shader() -> String {
     SHARED_STATE.lock().unwrap().clone().shader
 }
 
+pub fn get_dirty_flag() -> bool {
+    DIRTY_FLAG.lock().unwrap().clone()
+}
+
+pub fn set_dirty_flag() {
+    let mut flag = DIRTY_FLAG.lock().unwrap();
+    (*flag) = true;
+}
+
+pub fn reset_dirty_flag() {
+    let mut flag = DIRTY_FLAG.lock().unwrap();
+    (*flag) = false;
+}
+
 #[wasm_bindgen]
 pub fn set_shader(new_shader: JsString) {
     SHARED_STATE.lock().unwrap().shader = new_shader.into();
+    set_dirty_flag();
 }
 
 pub struct Spawner {}
@@ -63,8 +77,29 @@ impl Spawner {
     }
 }
 
+fn get_shader_module(device: &wgpu::Device, shader: &String) -> wgpu::ShaderModule {
+    device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::ShaderSource::Wgsl(shader.into()),
+    })
+}
+
+fn get_compute_pipelines(
+    device: &wgpu::Device,
+    compute_shader: &wgpu::ShaderModule,
+    compute_pipeline_layout: &wgpu::PipelineLayout,
+    entry_points: &Vec<String>
+) -> Vec<wgpu::ComputePipeline> {
+    entry_points.iter().map(|name| device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(compute_pipeline_layout),
+        module: compute_shader,
+        entry_point: name,
+    })).collect()
+}
+
 async fn run(event_loop: EventLoop<()>, window: Window, entry_points: Vec<String>) {
-    let shader = get_shader();
+    let mut shader = get_shader();
 
     let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
@@ -145,10 +180,8 @@ async fn run(event_loop: EventLoop<()>, window: Window, entry_points: Vec<String
     });
 
     // compute pipeline
-    let compute_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: None,
-        source: wgpu::ShaderSource::Wgsl(shader.into()),
-    });
+    let mut compute_shader = get_shader_module(&device, &shader);
+
     let compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
         entries: &[
@@ -223,12 +256,16 @@ async fn run(event_loop: EventLoop<()>, window: Window, entry_points: Vec<String
         bind_group_layouts: &[&compute_bind_group_layout],
         push_constant_ranges: &[],
     });
+
+    let mut compute_pipelines = get_compute_pipelines(&device, &compute_shader, &compute_pipeline_layout, &entry_points);
+
+    /*
     let compute_pipelines: Vec<_> = entry_points.iter().map(|name| device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: None,
             layout: Some(&compute_pipeline_layout),
             module: &compute_shader,
             entry_point: name,
-        })).collect();
+        })).collect();*/
     let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &compute_bind_group_layout,
@@ -339,6 +376,12 @@ async fn run(event_loop: EventLoop<()>, window: Window, entry_points: Vec<String
         *control_flow = ControlFlow::Poll;
         match event {
             Event::RedrawRequested(_) => {
+                if get_dirty_flag() {
+                    shader = get_shader();
+                    compute_shader = get_shader_module(&device, &shader);
+                    compute_pipelines = get_compute_pipelines(&device, &compute_shader, &compute_pipeline_layout, &entry_points);
+                    reset_dirty_flag();
+                }
                 let frame = surface
                     .get_current_texture()
                     .expect("error getting texture from swap chain");
