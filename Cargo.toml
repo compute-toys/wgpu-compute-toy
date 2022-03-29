@@ -26,6 +26,8 @@ js-sys = "0.3.50"
 wasm-bindgen-futures = "0.4.23"
 web-sys = "0.3.22"
 
+once_cell = "1.10.0"
+
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for

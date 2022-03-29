@@ -2,6 +2,9 @@ mod utils;
 
 use wasm_bindgen::prelude::*;
 
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
+
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
 #[cfg(feature = "wee_alloc")]
@@ -26,6 +29,27 @@ use winit::{
     window::Window,
 };
 
+#[derive(Clone)]
+pub struct State {
+    shader: String,
+    width: u32,
+    height: u32
+}
+
+
+static SHARED_STATE: Lazy<Mutex<State>> = Lazy::new(|| Mutex::new(State { shader: String::from(" "), width: 1280, height: 720 }));
+
+
+#[wasm_bindgen]
+pub fn get_shader() -> String {
+    SHARED_STATE.lock().unwrap().clone().shader
+}
+
+#[wasm_bindgen]
+pub fn set_shader(new_shader: JsString) {
+    SHARED_STATE.lock().unwrap().shader = new_shader.into();
+}
+
 pub struct Spawner {}
 
 impl Spawner {
@@ -39,7 +63,9 @@ impl Spawner {
     }
 }
 
-async fn run(event_loop: EventLoop<()>, window: Window, shader: String, entry_points: Vec<String>) {
+async fn run(event_loop: EventLoop<()>, window: Window, entry_points: Vec<String>) {
+    let shader = get_shader();
+
     let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
@@ -397,7 +423,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, shader: String, entry_po
 use js_sys::JsString;
 
 #[wasm_bindgen]
-pub fn main(shader: JsString, entry_points: Vec<JsString>) {
+pub fn main(entry_points: Vec<JsString>) {
     let event_loop = EventLoop::new();
     let win = Window::new(&event_loop).unwrap();
 
@@ -418,7 +444,7 @@ pub fn main(shader: JsString, entry_points: Vec<JsString>) {
     use wasm_bindgen::{prelude::*, JsCast};
 
     wasm_bindgen_futures::spawn_local(async move {
-        let setup = run(event_loop, win, shader.into(), entry_points.iter().map(<&JsString>::into).collect()).await;
+        let setup = run(event_loop, win, entry_points.iter().map(<&JsString>::into).collect()).await;
         let start_closure = Closure::once_into_js(move || setup);
 
         // make sure to handle JS exceptions thrown inside start.
