@@ -436,4 +436,8 @@ impl WgpuToyRenderer {
             })
         }).collect()
     }
+
+    pub fn set_frame_count(&mut self, frame_count: u32) {
+        self.frame_count = frame_count;
+    }
 }
