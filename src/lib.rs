@@ -478,6 +478,6 @@ impl WgpuToyRenderer {
         self.uniforms = create_uniforms(&self.wgpu, width, height);
         self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms);
         self.render_bind_group = create_render_bind_group(&self.wgpu, &self.render_bind_group_layout, &self.uniforms);
-        self.wgpu.window.set_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
     }
 }
