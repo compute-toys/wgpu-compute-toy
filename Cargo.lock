@@ -1488,7 +1488,6 @@ dependencies = [
  "env_logger",
  "js-sys",
  "log",
- "once_cell",
  "pollster",
  "wasm-bindgen",
  "wasm-bindgen-futures",
