@@ -18,26 +18,41 @@ pub struct WgpuContext {
     surface: wgpu::Surface,
 }
 
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+#[repr(C)]
+struct Params {
+    width: u32,
+    height: u32,
+    frames: u32,
+}
+
+struct Uniforms {
+    params_buffer: wgpu::Buffer,
+    storage_buffer: wgpu::Buffer,
+    tex_read: wgpu::Texture,
+    tex_write: wgpu::Texture,
+    tex_screen: wgpu::Texture,
+}
+
 #[wasm_bindgen]
 pub struct WgpuToyRenderer {
     wgpu: WgpuContext,
-    width: u32,
-    height: u32,
-    params: wgpu::Buffer,
-    buf_read: wgpu::Texture,
-    buf_write: wgpu::Texture,
+    params: Params,
+    uniforms: Uniforms,
+    compute_bind_group_layout: wgpu::BindGroupLayout,
     compute_pipeline_layout: wgpu::PipelineLayout,
     compute_pipelines: Vec<wgpu::ComputePipeline>,
     compute_bind_group: wgpu::BindGroup,
+    render_bind_group_layout: wgpu::BindGroupLayout,
     render_pipeline: wgpu::RenderPipeline,
     render_pipeline_srgb: wgpu::RenderPipeline,
     render_bind_group: wgpu::BindGroup,
     staging_belt: wgpu::util::StagingBelt,
-    frame_count: u32,
 }
 
 #[wasm_bindgen]
 pub async fn init_wgpu(bind_id: JsString) -> WgpuContext {
+    let bind_id: String = bind_id.into();
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
 
@@ -51,7 +66,6 @@ pub async fn init_wgpu(bind_id: JsString) -> WgpuContext {
 
         let window = web_sys::window().unwrap();
         let document = window.document().unwrap();
-        let bind_id: String = bind_id.into();
         let bound_element = document.get_element_by_id(&bind_id).unwrap();
 
         // Set a background color for the canvas to make it easier to tell the where the canvas is for debugging purposes.
@@ -73,7 +87,6 @@ pub async fn init_wgpu(bind_id: JsString) -> WgpuContext {
         .request_device(&Default::default(), None)
         .await
         .expect("error creating device");
-    window.set_inner_size(winit::dpi::PhysicalSize::new(1280, 720));
     let size = window.inner_size();
     let format = surface.get_preferred_format(&adapter).unwrap();
     surface.configure(&device, &wgpu::SurfaceConfiguration {
@@ -92,37 +105,25 @@ pub async fn init_wgpu(bind_id: JsString) -> WgpuContext {
     }
 }
 
-#[wasm_bindgen]
-impl WgpuToyRenderer {
-    #[wasm_bindgen(constructor)]
-    pub fn new(wgpu: WgpuContext) -> WgpuToyRenderer {
-        let size = wgpu.window.inner_size();
-
-        // uniforms
-        let params = wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
+    Uniforms {
+        params_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: 3 * 4,
+            size: std::mem::size_of::<Params>() as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
-        });
-        let img = wgpu.device.create_texture(&wgpu::TextureDescriptor {
+        }),
+        storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (4 * 4 * width * height).into(),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        }),
+        tex_read: wgpu.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-        });
-        let buf_read = wgpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
+                width,
+                height,
                 depth_or_array_layers: 4,
             },
             mip_level_count: 1,
@@ -130,12 +131,12 @@ impl WgpuToyRenderer {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-        });
-        let buf_write = wgpu.device.create_texture(&wgpu::TextureDescriptor {
+        }),
+        tex_write: wgpu.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
+                width,
+                height,
                 depth_or_array_layers: 4,
             },
             mip_level_count: 1,
@@ -143,15 +144,67 @@ impl WgpuToyRenderer {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
             usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
-        });
-        let sb0 = wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+        }),
+        tex_screen: wgpu.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
-            size: (4 * 4 * size.width * size.height).into(),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM,
-            mapped_at_creation: false,
-        });
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        }),
+    }
+}
 
-        // compute pipeline
+fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout, uniforms: &Uniforms) -> wgpu::BindGroup {
+    wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: uniforms.params_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&uniforms.tex_screen.create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 2, resource: uniforms.storage_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&uniforms.tex_read.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                ..Default::default()
+            })) },
+            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&uniforms.tex_write.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                ..Default::default()
+            })) },
+            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            })) },
+        ],
+    })
+}
+
+fn create_render_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout, uniforms: &Uniforms) -> wgpu::BindGroup {
+    wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&uniforms.tex_screen.create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
+        ],
+    })
+}
+
+#[wasm_bindgen]
+impl WgpuToyRenderer {
+    #[wasm_bindgen(constructor)]
+    pub fn new(wgpu: WgpuContext) -> WgpuToyRenderer {
+        let size = wgpu.window.inner_size();
+        let uniforms = create_uniforms(&wgpu, size.width, size.height);
+
         let compute_bind_group_layout = wgpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[
@@ -226,31 +279,8 @@ impl WgpuToyRenderer {
             bind_group_layouts: &[&compute_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let compute_bind_group = wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &compute_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&img.create_view(&Default::default())) },
-                wgpu::BindGroupEntry { binding: 2, resource: sb0.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&buf_read.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2Array),
-                    ..Default::default()
-                })) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&buf_write.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2Array),
-                    ..Default::default()
-                })) },
-                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
-                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
-                    mag_filter: wgpu::FilterMode::Linear,
-                    min_filter: wgpu::FilterMode::Linear,
-                    ..Default::default()
-                })) },
-            ],
-        });
+        let compute_bind_group = create_compute_bind_group(&wgpu, &compute_bind_group_layout, &uniforms);
 
-        // render pipeline
         let render_shader = wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
@@ -321,33 +351,28 @@ impl WgpuToyRenderer {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
-        let render_bind_group = wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &render_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&img.create_view(&Default::default())) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
-            ],
-        });
+        let render_bind_group = create_render_bind_group(&wgpu, &render_bind_group_layout, &uniforms);
 
         let staging_belt = wgpu::util::StagingBelt::new(0x100);
-        let frame_count: u32 = 0;
+        let params = Params {
+            width: size.width,
+            height: size.height,
+            frames: 0,
+        };
 
         WgpuToyRenderer {
             wgpu,
-            width: size.width,
-            height: size.height,
             params,
-            buf_read,
-            buf_write,
+            uniforms,
+            compute_bind_group_layout,
             compute_pipeline_layout,
             compute_pipelines: vec![],
             compute_bind_group,
+            render_bind_group_layout,
             render_pipeline,
             render_pipeline_srgb,
             render_bind_group,
             staging_belt,
-            frame_count,
         }
     }
 
@@ -355,38 +380,43 @@ impl WgpuToyRenderer {
         let frame = self.wgpu.surface
             .get_current_texture()
             .expect("error getting texture from swap chain");
-        let params_data = [self.width, self.height, self.frame_count];
-        let params_bytes = bytemuck::bytes_of(&params_data);
+        let params_bytes = bytemuck::bytes_of(&self.params);
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
-        self.staging_belt.write_buffer(&mut encoder, &self.params, 0, wgpu::BufferSize::new(params_bytes.len() as wgpu::BufferAddress).unwrap(), &self.wgpu.device).copy_from_slice(params_bytes);
+        self.staging_belt.write_buffer(
+            &mut encoder,
+            &self.uniforms.params_buffer,
+            0,
+            wgpu::BufferSize::new(params_bytes.len() as wgpu::BufferAddress).unwrap(),
+            &self.wgpu.device
+        ).copy_from_slice(params_bytes);
         self.staging_belt.finish();
         for pipeline in &self.compute_pipelines {
             {
                 let mut compute_pass = encoder.begin_compute_pass(&Default::default());
                 compute_pass.set_pipeline(pipeline);
                 compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-                compute_pass.dispatch(self.width / 16, self.height / 16, 1);
+                compute_pass.dispatch(self.params.width / 16, self.params.height / 16, 1);
             }
             encoder.copy_texture_to_texture(
                 wgpu::ImageCopyTexture {
-                    texture: &self.buf_write,
+                    texture: &self.uniforms.tex_write,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::ImageCopyTexture {
-                    texture: &self.buf_read,
+                    texture: &self.uniforms.tex_read,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::Extent3d {
-                    width: self.width,
-                    height: self.height,
+                    width: self.params.width,
+                    height: self.params.height,
                     depth_or_array_layers: 4,
                 });
         }
-        self.frame_count += 1;
+        self.params.frames += 1;
         // blit the output texture to the framebuffer
         {
             let format = self.wgpu.surface.get_preferred_format(&self.wgpu.adapter).unwrap();
@@ -438,6 +468,16 @@ impl WgpuToyRenderer {
     }
 
     pub fn set_frame_count(&mut self, frame_count: u32) {
-        self.frame_count = frame_count;
+        self.params.frames = frame_count;
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.params.width = width;
+        self.params.height = height;
+        self.params.frames = 0;
+        self.uniforms = create_uniforms(&self.wgpu, width, height);
+        self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms);
+        self.render_bind_group = create_render_bind_group(&self.wgpu, &self.render_bind_group_layout, &self.uniforms);
+        self.wgpu.window.set_inner_size(winit::dpi::PhysicalSize::new(width, height));
     }
 }
