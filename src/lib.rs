@@ -466,7 +466,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, entry_points: Vec<String
 use js_sys::JsString;
 
 #[wasm_bindgen]
-pub fn main(entry_points: Vec<JsString>) {
+pub fn main(bind_id: JsString, entry_points: Vec<JsString>) {
     let event_loop = EventLoop::new();
     let win = Window::new(&event_loop).unwrap();
 
@@ -476,13 +476,15 @@ pub fn main(entry_points: Vec<JsString>) {
     use winit::platform::web::WindowExtWebSys;
     let canvas = win.canvas();
 
+    let bind_id_str: String = bind_id.into();
+
     let window = web_sys::window().unwrap();
     let document = window.document().unwrap();
-    let body = document.body().unwrap();
+    let bound_element = document.get_element_by_id(&bind_id_str).unwrap();
 
     // Set a background color for the canvas to make it easier to tell the where the canvas is for debugging purposes.
     canvas.style().set_css_text("background-color: crimson;");
-    body.append_child(&canvas).unwrap();
+    bound_element.append_child(&canvas).unwrap();
 
     use wasm_bindgen::{prelude::*, JsCast};
 
