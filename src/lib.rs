@@ -423,10 +423,12 @@ impl WgpuToyRenderer {
     }
 
     pub fn set_shader(&mut self, shader: JsString, entry_points: Vec<JsString>) {
+        let mut wgsl: String = include_str!("prelude.wgsl").into();
         let shader: String = shader.into();
+        wgsl.push_str(&shader);
         let compute_shader = self.wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&shader)),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
         });
         self.compute_pipelines = entry_points.iter().map(|name| {
             let name: String = name.into();
