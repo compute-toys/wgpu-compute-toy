@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::*;
 use js_sys::JsString;
 use web_sys::HtmlCanvasElement;
 use naga::front::wgsl;
+use num::Integer;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -379,7 +380,7 @@ impl WgpuToyRenderer {
                 let mut compute_pass = encoder.begin_compute_pass(&Default::default());
                 compute_pass.set_pipeline(pipeline);
                 compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-                compute_pass.dispatch(self.params.width / workgroup_size[0], self.params.height / workgroup_size[1], 1);
+                compute_pass.dispatch(self.params.width.div_ceil(&workgroup_size[0]), self.params.height.div_ceil(&workgroup_size[1]), 1);
             }
             encoder.copy_texture_to_texture(
                 wgpu::ImageCopyTexture {
