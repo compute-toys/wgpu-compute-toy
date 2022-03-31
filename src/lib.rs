@@ -2,6 +2,7 @@ mod utils;
 
 use wasm_bindgen::prelude::*;
 use js_sys::JsString;
+use web_sys::HtmlCanvasElement;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -148,22 +149,28 @@ pub async fn init_wgpu(bind_id: JsString) -> WgpuContext {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-        console_log::init_with_level(log::Level::Debug).expect("error initializing logger");
-
-        use winit::platform::web::WindowExtWebSys;
-        let canvas = window.canvas();
-
-        let window = web_sys::window().unwrap();
-        let document = window.document().unwrap();
-        let bound_element = document.get_element_by_id(&bind_id).unwrap();
-
-        // Set a background color for the canvas to make it easier to tell the where the canvas is for debugging purposes.
-        canvas.style().set_css_text("background-color: crimson;");
-        bound_element.append_child(&canvas).unwrap();
-    }
+    //https://githubmemory.com/index.php/@aentity
+    let window = if cfg!(target_arch = "wasm32") {
+        let canvas_element = {
+            console_log::init_with_level(log::Level::Debug)
+                .expect("error initializing logger");
+            std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+            use wasm_bindgen::JsCast;
+            web_sys::window()
+                .and_then(|win| win.document())
+                .and_then(|doc| doc.get_element_by_id(&bind_id))
+                .and_then(|element| element.dyn_into::<HtmlCanvasElement>().ok())
+                .expect("Canvas is missing")
+        };
+        use winit::platform::web::WindowBuilderExtWebSys;
+        winit::window::WindowBuilder::new()
+            .with_canvas(Some(canvas_element))
+            .build(&event_loop)
+            .expect("Failed to build winit window")
+    } else {
+        env_logger::init();
+        winit::window::Window::new(&event_loop).unwrap()
+    };
 
     let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
