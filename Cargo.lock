@@ -758,6 +758,22 @@ dependencies = [
 
 [[package]]
 name = "naga"
+version = "0.8.0"
+source = "git+https://github.com/gfx-rs/naga?rev=f90e563#f90e563c281cfc71c794e0426ebcced9e3999202"
+dependencies = [
+ "bit-set",
+ "bitflags",
+ "codespan-reporting",
+ "hexf-parse",
+ "indexmap",
+ "log",
+ "num-traits",
+ "rustc-hash",
+ "thiserror",
+]
+
+[[package]]
+name = "naga"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3012f2dbcc79e8e0b5825a4836a7106a75dd9b2fe42c528163be0f572538c705"
@@ -1409,7 +1425,7 @@ dependencies = [
  "arrayvec",
  "js-sys",
  "log",
- "naga",
+ "naga 0.8.5",
  "parking_lot",
  "raw-window-handle",
  "smallvec",
@@ -1434,7 +1450,7 @@ dependencies = [
  "copyless",
  "fxhash",
  "log",
- "naga",
+ "naga 0.8.5",
  "parking_lot",
  "profiling",
  "raw-window-handle",
@@ -1468,7 +1484,7 @@ dependencies = [
  "libloading",
  "log",
  "metal",
- "naga",
+ "naga 0.8.5",
  "objc",
  "parking_lot",
  "profiling",
@@ -1502,6 +1518,7 @@ dependencies = [
  "env_logger",
  "js-sys",
  "log",
+ "naga 0.8.0",
  "pollster",
  "wasm-bindgen",
  "wasm-bindgen-futures",

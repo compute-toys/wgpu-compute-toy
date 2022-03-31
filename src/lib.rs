@@ -3,6 +3,7 @@ mod utils;
 use wasm_bindgen::prelude::*;
 use js_sys::JsString;
 use web_sys::HtmlCanvasElement;
+use naga::front::wgsl;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -147,12 +148,11 @@ const RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgp
 pub async fn init_wgpu(bind_id: JsString) -> WgpuContext {
     let bind_id: String = bind_id.into();
     let event_loop = winit::event_loop::EventLoop::new();
-    let window = winit::window::Window::new(&event_loop).unwrap();
 
     //https://githubmemory.com/index.php/@aentity
     let window = if cfg!(target_arch = "wasm32") {
         let canvas_element = {
-            console_log::init_with_level(log::Level::Debug)
+            console_log::init_with_level(log::Level::Info)
                 .expect("error initializing logger");
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
             use wasm_bindgen::JsCast;
@@ -429,23 +429,33 @@ impl WgpuToyRenderer {
         frame.present();
     }
 
-    pub fn set_shader(&mut self, shader: JsString, entry_points: Vec<JsString>) {
+    pub fn set_shader(&mut self, shader: JsString) {
         let mut wgsl: String = include_str!("prelude.wgsl").into();
         let shader: String = shader.into();
         wgsl.push_str(&shader);
-        let compute_shader = self.wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
-        });
-        self.compute_pipelines = entry_points.iter().map(|name| {
-            let name: String = name.into();
-            self.wgpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: None,
-                layout: Some(&self.compute_pipeline_layout),
-                module: &compute_shader,
-                entry_point: &name,
-            })
-        }).collect()
+        match wgsl::parse_str(&wgsl) {
+            Ok(module) => {
+                let entry_points: Vec<String> = module.entry_points.iter()
+                    .filter(|f| f.stage == naga::ShaderStage::Compute)
+                    .map(|f| f.name.clone()).collect();
+                log::info!("Discovered compute shader entry points: {}", entry_points.join(", "));
+                let compute_shader = self.wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+                    label: None,
+                    source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
+                });
+                self.compute_pipelines = entry_points.iter().map(|name| {
+                    self.wgpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                        label: None,
+                        layout: Some(&self.compute_pipeline_layout),
+                        module: &compute_shader,
+                        entry_point: &name,
+                    })
+                }).collect();
+            },
+            Err(e) => {
+                log::error!("Error parsing WGSL: {}", e);
+            },
+        }
     }
 
     pub fn set_frame_count(&mut self, frame_count: u32) {
