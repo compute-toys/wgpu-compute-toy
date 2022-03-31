@@ -43,7 +43,7 @@ pub struct WgpuToyRenderer {
     uniforms: Uniforms,
     compute_bind_group_layout: wgpu::BindGroupLayout,
     compute_pipeline_layout: wgpu::PipelineLayout,
-    compute_pipelines: Vec<wgpu::ComputePipeline>,
+    compute_pipelines: Vec<(wgpu::ComputePipeline, [u32; 3])>,
     compute_bind_group: wgpu::BindGroup,
     render_bind_group_layout: wgpu::BindGroupLayout,
     render_pipeline: wgpu::RenderPipeline,
@@ -374,12 +374,12 @@ impl WgpuToyRenderer {
             &self.wgpu.device
         ).copy_from_slice(params_bytes);
         self.staging_belt.finish();
-        for pipeline in &self.compute_pipelines {
+        for (pipeline, workgroup_size) in &self.compute_pipelines {
             {
                 let mut compute_pass = encoder.begin_compute_pass(&Default::default());
                 compute_pass.set_pipeline(pipeline);
                 compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-                compute_pass.dispatch(self.params.width / 16, self.params.height / 16, 1);
+                compute_pass.dispatch(self.params.width / workgroup_size[0], self.params.height / workgroup_size[1], 1);
             }
             encoder.copy_texture_to_texture(
                 wgpu::ImageCopyTexture {
@@ -435,21 +435,19 @@ impl WgpuToyRenderer {
         wgsl.push_str(&shader);
         match wgsl::parse_str(&wgsl) {
             Ok(module) => {
-                let entry_points: Vec<String> = module.entry_points.iter()
-                    .filter(|f| f.stage == naga::ShaderStage::Compute)
-                    .map(|f| f.name.clone()).collect();
-                log::info!("Discovered compute shader entry points: {}", entry_points.join(", "));
+                let entry_points: Vec<_> = module.entry_points.iter()
+                    .filter(|f| f.stage == naga::ShaderStage::Compute).collect();
                 let compute_shader = self.wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
                     label: None,
                     source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
                 });
-                self.compute_pipelines = entry_points.iter().map(|name| {
-                    self.wgpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                self.compute_pipelines = entry_points.iter().map(|entry_point| {
+                    (self.wgpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                         label: None,
                         layout: Some(&self.compute_pipeline_layout),
                         module: &compute_shader,
-                        entry_point: &name,
-                    })
+                        entry_point: &entry_point.name,
+                    }), entry_point.workgroup_size)
                 }).collect();
             },
             Err(e) => {
