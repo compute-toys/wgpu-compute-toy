@@ -181,34 +181,32 @@ const RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgp
 };
 
 #[cfg(target_arch = "wasm32")]
-fn init_window(bind_id: JsString) -> winit::window::Window {
+fn init_window(bind_id: JsString) -> Option<winit::window::Window> {
     let bind_id: String = bind_id.into();
-    console_log::init_with_level(log::Level::Info).expect("error initialising logger");
+    console_log::init_with_level(log::Level::Info).ok()?;
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    use wasm_bindgen::JsCast;
     let event_loop = winit::event_loop::EventLoop::new();
-    let canvas_element = web_sys::window()
-            .and_then(|win| win.document())
-            .and_then(|doc| doc.get_element_by_id(&bind_id))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
-            .expect("Canvas is missing");
+    let win = web_sys::window()?;
+    let doc = win.document()?;
+    let element = doc.get_element_by_id(&bind_id)?;
+    use wasm_bindgen::JsCast;
+    let canvas = element.dyn_into::<web_sys::HtmlCanvasElement>().ok()?;
     use winit::platform::web::WindowBuilderExtWebSys;
     winit::window::WindowBuilder::new()
-        .with_canvas(Some(canvas_element))
-        .build(&event_loop)
-        .expect("Failed to build winit window")
+        .with_canvas(Some(canvas))
+        .build(&event_loop).ok()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn init_window(_: JsString) -> winit::window::Window {
+fn init_window(_: JsString) -> Option<winit::window::Window> {
     env_logger::init();
     let event_loop = winit::event_loop::EventLoop::new();
-    winit::window::Window::new(&event_loop).unwrap()
+    winit::window::Window::new(&event_loop).ok()
 }
 
 #[wasm_bindgen]
 pub async fn init_wgpu(bind_id: JsString) -> WgpuContext {
-    let window = init_window(bind_id);
+    let window = init_window(bind_id).expect("failed to create window");
     let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
