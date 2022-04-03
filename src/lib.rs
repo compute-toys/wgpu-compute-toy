@@ -65,6 +65,7 @@ pub struct WgpuToyRenderer {
     render_pipeline: wgpu::RenderPipeline,
     render_bind_group: wgpu::BindGroup,
     staging_belt: wgpu::util::StagingBelt,
+    on_error_cb: Option<js_sys::Function>,
 }
 
 
@@ -352,6 +353,11 @@ fn stage<T: bytemuck::Pod>(staging_belt: &mut wgpu::util::StagingBelt, device: &
         .copy_from_slice(bytemuck::bytes_of(data));
 }
 
+// https://llogiq.github.io/2016/09/24/newline.html
+fn count_newlines(s: &str) -> usize {
+    s.as_bytes().iter().filter(|&&c| c == b'\n').count()
+}
+
 #[wasm_bindgen]
 impl WgpuToyRenderer {
     #[wasm_bindgen(constructor)]
@@ -418,6 +424,7 @@ impl WgpuToyRenderer {
             uniforms,
             compute_bind_group_layout,
             render_bind_group_layout,
+            on_error_cb: None,
         }
     }
 
@@ -486,7 +493,9 @@ impl WgpuToyRenderer {
     }
 
     pub fn set_shader(&mut self, shader: JsString) {
-        let mut wgsl: String = include_str!("prelude.wgsl").into();
+        let prelude: String = include_str!("prelude.wgsl").into();
+        let prelude_len = count_newlines(&prelude); // in case we need to report errors
+        let mut wgsl = prelude;
         let shader: String = shader.into();
         wgsl.push_str(&shader);
         match wgsl::parse_str(&wgsl) {
@@ -507,7 +516,26 @@ impl WgpuToyRenderer {
                 }).collect();
             },
             Err(e) => {
+
                 log::error!("Error parsing WGSL: {}", e);
+                match self.on_error_cb {
+                    None => log::error!("No error callback registered"),
+                    Some(ref callback) => {
+                        let (row, col) = e.location(&wgsl);
+                        let summary = e.emit_to_string(&wgsl);
+                        let res = callback.call3(
+                            &JsValue::NULL,
+                            &JsValue::from(summary),
+                            &JsValue::from(row - prelude_len),
+                            &JsValue::from(col)
+                        );
+                        match res {
+                            Err(error) => log::error!("Error calling registered error callback, error: {:?}", error),
+                            _ => ()
+                        };
+                    }
+                }
+
             },
         }
     }
@@ -531,5 +559,9 @@ impl WgpuToyRenderer {
         self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms);
         self.render_bind_group = create_render_bind_group(&self.wgpu, &self.render_bind_group_layout, &self.uniforms);
         self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
+    }
+
+    pub fn on_error(&mut self, callback: js_sys::Function) {
+        self.on_error_cb = Some(callback);
     }
 }
