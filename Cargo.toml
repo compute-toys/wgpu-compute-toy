@@ -46,6 +46,11 @@ rev = "43cd0ec"
 #version = "0.8"
 features = ["wgsl-in"]
 
+[dependencies.image]
+version = "0.24"
+default-features = false
+features = ["png", "jpeg"]
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3.13"
 

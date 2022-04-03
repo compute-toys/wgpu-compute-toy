@@ -26,3 +26,4 @@ struct StorageBuffer { data: array<atomic<i32>> };
 @group(0) @binding(6) var texs: texture_storage_2d_array<rgba16float,write>;
 @group(0) @binding(7) var nearest: sampler;
 @group(0) @binding(8) var bilinear: sampler;
+@group(0) @binding(9) var channel0: texture_2d<f32>;
