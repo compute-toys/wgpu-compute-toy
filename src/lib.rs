@@ -2,7 +2,9 @@ mod utils;
 
 use wasm_bindgen::prelude::*;
 use js_sys::JsString;
+use lazy_static::lazy_static;
 use naga::front::wgsl;
+use naga::front::wgsl::ParseError;
 use num::Integer;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
@@ -370,6 +372,35 @@ fn count_newlines(s: &str) -> usize {
     s.as_bytes().iter().filter(|&&c| c == b'\n').count()
 }
 
+// FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn error(s: &str);
+}
+
+// FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
+fn wgpu_error_to_console_error(e: wgpu::Error) {
+    use regex::Regex;
+    let err = &e.to_string();
+
+    //lazy static to avoid repeated regex recompilation
+    lazy_static! {
+        static ref RE_PARSE_ERR: Regex = Regex::new(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader").unwrap();
+        static ref PRELUDE: String = include_str!("prelude.wgsl").into();
+        static ref PRELUDE_LEN: usize = count_newlines(&PRELUDE);
+    }
+
+    for cap in RE_PARSE_ERR.captures_iter(err) {
+        let line_str: &str = &cap[1];
+        let line_num: usize = line_str.parse().unwrap_or(*PRELUDE_LEN);
+        let line_sans_prelude = line_num - *PRELUDE_LEN;
+        let err_str = format!("WGPU_PARSE_ERR:{}:{}:{}", line_sans_prelude.to_string(), &cap[2], &cap[3]);
+        error(&err_str);
+    }
+
+}
+
 #[wasm_bindgen]
 impl WgpuToyRenderer {
     #[wasm_bindgen(constructor)]
@@ -399,6 +430,8 @@ impl WgpuToyRenderer {
                 label: None,
             }
         );
+
+        wgpu.device.on_uncaptured_error(&wgpu_error_to_console_error);
 
         WgpuToyRenderer {
             compute_pipeline_layout: wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -521,10 +554,30 @@ impl WgpuToyRenderer {
         frame.present();
     }
 
-    pub fn set_shader(&mut self, shader: JsString) {
+    fn handle_error(&self, e: ParseError, wgsl: &str) {
         let prelude: String = include_str!("prelude.wgsl").into();
         let prelude_len = count_newlines(&prelude); // in case we need to report errors
-        let mut wgsl = prelude;
+        match self.on_error_cb {
+            None => log::error!("No error callback registered"),
+            Some(ref callback) => {
+                let (row, col) = e.location(&wgsl);
+                let summary = e.emit_to_string(&wgsl);
+                let res = callback.call3(
+                    &JsValue::NULL,
+                    &JsValue::from(summary),
+                    &JsValue::from(row - prelude_len),
+                    &JsValue::from(col)
+                );
+                match res {
+                    Err(error) => log::error!("Error calling registered error callback, error: {:?}", error),
+                    _ => ()
+                };
+            }
+        }
+    }
+
+    pub fn set_shader(&mut self, shader: JsString) {
+        let mut wgsl: String = include_str!("prelude.wgsl").into();
         let shader: String = shader.into();
         wgsl.push_str(&shader);
         match wgsl::parse_str(&wgsl) {
@@ -545,26 +598,8 @@ impl WgpuToyRenderer {
                 }).collect();
             },
             Err(e) => {
-
                 log::error!("Error parsing WGSL: {}", e);
-                match self.on_error_cb {
-                    None => log::error!("No error callback registered"),
-                    Some(ref callback) => {
-                        let (row, col) = e.location(&wgsl);
-                        let summary = e.emit_to_string(&wgsl);
-                        let res = callback.call3(
-                            &JsValue::NULL,
-                            &JsValue::from(summary),
-                            &JsValue::from(row - prelude_len),
-                            &JsValue::from(col)
-                        );
-                        match res {
-                            Err(error) => log::error!("Error calling registered error callback, error: {:?}", error),
-                            _ => ()
-                        };
-                    }
-                }
-
+                self.handle_error(e, &wgsl);
             },
         }
     }
