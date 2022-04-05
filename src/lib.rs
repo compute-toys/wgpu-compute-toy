@@ -1,7 +1,6 @@
 mod utils;
 
 use wasm_bindgen::prelude::*;
-use lazy_static::lazy_static;
 use naga::front::wgsl;
 use naga::front::wgsl::ParseError;
 use num::Integer;
@@ -51,6 +50,33 @@ struct Uniforms {
     tex_screen: wgpu::Texture,
 }
 
+#[derive(Clone)]
+struct ErrorCallback(Option<js_sys::Function>);
+
+impl ErrorCallback {
+    fn call(&self, summary: &str, row: usize, col: usize) {
+        match self.0 {
+            None => log::error!("No error callback registered"),
+            Some(ref callback) => {
+                let res = callback.call3(
+                    &JsValue::NULL,
+                    &JsValue::from(summary),
+                    &JsValue::from(row),
+                    &JsValue::from(col)
+                );
+                match res {
+                    Err(error) => log::error!("Error calling registered error callback, error: {:?}", error),
+                    _ => ()
+                };
+            }
+        }
+    }
+}
+
+// safe because wasm is single-threaded: https://github.com/rustwasm/wasm-bindgen/issues/1505
+unsafe impl Send for ErrorCallback {}
+unsafe impl Sync for ErrorCallback {}
+
 #[wasm_bindgen]
 pub struct WgpuToyRenderer {
     wgpu: WgpuContext,
@@ -66,7 +92,7 @@ pub struct WgpuToyRenderer {
     render_pipeline: wgpu::RenderPipeline,
     render_bind_group: wgpu::BindGroup,
     staging_belt: wgpu::util::StagingBelt,
-    on_error_cb: Box<dyn Fn(&str, usize, usize)>,
+    on_error_cb: ErrorCallback,
     channel0: wgpu::Texture,
 }
 
@@ -371,35 +397,6 @@ fn count_newlines(s: &str) -> usize {
     s.as_bytes().iter().filter(|&&c| c == b'\n').count()
 }
 
-// FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn error(s: &str);
-}
-
-// FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
-fn wgpu_error_to_console_error(e: wgpu::Error) {
-    use regex::Regex;
-    let err = &e.to_string();
-
-    //lazy static to avoid repeated regex recompilation
-    lazy_static! {
-        static ref RE_PARSE_ERR: Regex = Regex::new(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader").unwrap();
-        static ref PRELUDE: String = include_str!("prelude.wgsl").into();
-        static ref PRELUDE_LEN: usize = count_newlines(&PRELUDE);
-    }
-
-    for cap in RE_PARSE_ERR.captures_iter(err) {
-        let line_str: &str = &cap[1];
-        let line_num: usize = line_str.parse().unwrap_or(*PRELUDE_LEN);
-        let line_sans_prelude = line_num - *PRELUDE_LEN;
-        let err_str = format!("WGPU_PARSE_ERR:{}:{}:{}", line_sans_prelude.to_string(), &cap[2], &cap[3]);
-        error(&err_str);
-    }
-
-}
-
 #[wasm_bindgen]
 impl WgpuToyRenderer {
     #[wasm_bindgen(constructor)]
@@ -429,8 +426,6 @@ impl WgpuToyRenderer {
                 label: None,
             }
         );
-
-        wgpu.device.on_uncaptured_error(&wgpu_error_to_console_error);
 
         WgpuToyRenderer {
             compute_pipeline_layout: wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -484,7 +479,7 @@ impl WgpuToyRenderer {
             uniforms,
             compute_bind_group_layout,
             render_bind_group_layout,
-            on_error_cb: Box::new(|_, _, _| log::error!("No error callback registered")),
+            on_error_cb: ErrorCallback(None),
             channel0,
         }
     }
@@ -558,7 +553,7 @@ impl WgpuToyRenderer {
         let prelude_len = count_newlines(&prelude); // in case we need to report errors
         let (row, col) = e.location(&wgsl);
         let summary = e.emit_to_string(&wgsl);
-        (self.on_error_cb)(&summary, row - prelude_len, col);
+        self.on_error_cb.call(&summary, row - prelude_len, col);
     }
 
     pub fn set_shader(&mut self, shader: &str) {
@@ -611,17 +606,21 @@ impl WgpuToyRenderer {
     }
 
     pub fn on_error(&mut self, callback: js_sys::Function) {
-        self.on_error_cb = Box::new(move |summary, row, col| {
-            let res = callback.call3(
-                &JsValue::NULL,
-                &JsValue::from(summary),
-                &JsValue::from(row),
-                &JsValue::from(col),
-            );
-            match res {
-                Err(error) => log::error!("Error calling registered error callback, error: {:?}", error),
-                _ => ()
-            };
+        self.on_error_cb = ErrorCallback(Some(callback));
+
+        // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
+        let prelude: String = include_str!("prelude.wgsl").into();
+        let prelude_len = count_newlines(&prelude);
+        let re = regex::Regex::new(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader").unwrap();
+        let on_error_cb = self.on_error_cb.clone();
+        self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
+            let err = &e.to_string();
+            for cap in re.captures_iter(err) {
+                let row = cap[1].parse().unwrap_or(prelude_len);
+                let col = cap[2].parse().unwrap_or(0);
+                let summary = &cap[3];
+                on_error_cb.call(summary, row - prelude_len, col);
+            }
         });
     }
 
