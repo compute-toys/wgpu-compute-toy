@@ -1,7 +1,6 @@
 mod utils;
 
 use wasm_bindgen::prelude::*;
-use js_sys::JsString;
 use lazy_static::lazy_static;
 use naga::front::wgsl;
 use naga::front::wgsl::ParseError;
@@ -67,7 +66,7 @@ pub struct WgpuToyRenderer {
     render_pipeline: wgpu::RenderPipeline,
     render_bind_group: wgpu::BindGroup,
     staging_belt: wgpu::util::StagingBelt,
-    on_error_cb: Option<js_sys::Function>,
+    on_error_cb: Box<dyn Fn(&str, usize, usize)>,
     channel0: wgpu::Texture,
 }
 
@@ -195,8 +194,7 @@ const RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgp
 };
 
 #[cfg(target_arch = "wasm32")]
-fn init_window(bind_id: JsString) -> Option<winit::window::Window> {
-    let bind_id: String = bind_id.into();
+fn init_window(bind_id: String) -> Option<winit::window::Window> {
     console_log::init_with_level(log::Level::Info).ok()?;
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let event_loop = winit::event_loop::EventLoop::new();
@@ -212,14 +210,15 @@ fn init_window(bind_id: JsString) -> Option<winit::window::Window> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn init_window(_: JsString) -> Option<winit::window::Window> {
+fn init_window(_: String) -> Option<winit::window::Window> {
     env_logger::init();
     let event_loop = winit::event_loop::EventLoop::new();
     winit::window::Window::new(&event_loop).ok()
 }
 
+// FIXME: async fn(&str) doesn't currently work with wasm_bindgen: https://stackoverflow.com/a/63655324/78204
 #[wasm_bindgen]
-pub async fn init_wgpu(bind_id: JsString) -> WgpuContext {
+pub async fn init_wgpu(bind_id: String) -> WgpuContext {
     let window = init_window(bind_id).expect("failed to create window");
     let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
@@ -485,7 +484,7 @@ impl WgpuToyRenderer {
             uniforms,
             compute_bind_group_layout,
             render_bind_group_layout,
-            on_error_cb: None,
+            on_error_cb: Box::new(|_, _, _| log::error!("No error callback registered")),
             channel0,
         }
     }
@@ -557,26 +556,12 @@ impl WgpuToyRenderer {
     fn handle_error(&self, e: ParseError, wgsl: &str) {
         let prelude: String = include_str!("prelude.wgsl").into();
         let prelude_len = count_newlines(&prelude); // in case we need to report errors
-        match self.on_error_cb {
-            None => log::error!("No error callback registered"),
-            Some(ref callback) => {
-                let (row, col) = e.location(&wgsl);
-                let summary = e.emit_to_string(&wgsl);
-                let res = callback.call3(
-                    &JsValue::NULL,
-                    &JsValue::from(summary),
-                    &JsValue::from(row - prelude_len),
-                    &JsValue::from(col)
-                );
-                match res {
-                    Err(error) => log::error!("Error calling registered error callback, error: {:?}", error),
-                    _ => ()
-                };
-            }
-        }
+        let (row, col) = e.location(&wgsl);
+        let summary = e.emit_to_string(&wgsl);
+        (self.on_error_cb)(&summary, row - prelude_len, col);
     }
 
-    pub fn set_shader(&mut self, shader: JsString) {
+    pub fn set_shader(&mut self, shader: &str) {
         let mut wgsl: String = include_str!("prelude.wgsl").into();
         let shader: String = shader.into();
         wgsl.push_str(&shader);
@@ -626,7 +611,18 @@ impl WgpuToyRenderer {
     }
 
     pub fn on_error(&mut self, callback: js_sys::Function) {
-        self.on_error_cb = Some(callback);
+        self.on_error_cb = Box::new(move |summary, row, col| {
+            let res = callback.call3(
+                &JsValue::NULL,
+                &JsValue::from(summary),
+                &JsValue::from(row),
+                &JsValue::from(col),
+            );
+            match res {
+                Err(error) => log::error!("Error calling registered error callback, error: {:?}", error),
+                _ => ()
+            };
+        });
     }
 
     pub fn load_channel(&mut self, bytes: &[u8]) {
