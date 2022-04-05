@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::*;
 use naga::front::wgsl;
 use naga::front::wgsl::ParseError;
 use num::Integer;
+use bitvec::prelude::*;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -44,6 +45,7 @@ struct Uniforms {
     screen: wgpu::Buffer,
     time: wgpu::Buffer,
     mouse: wgpu::Buffer,
+    keys: wgpu::Buffer,
     storage_buffer: wgpu::Buffer,
     tex_read: wgpu::Texture,
     tex_write: wgpu::Texture,
@@ -77,12 +79,15 @@ impl ErrorCallback {
 unsafe impl Send for ErrorCallback {}
 unsafe impl Sync for ErrorCallback {}
 
+const NUM_KEYCODES: usize = 256;
+
 #[wasm_bindgen]
 pub struct WgpuToyRenderer {
     wgpu: WgpuContext,
     screen: Screen,
     time: Time,
     mouse: Mouse,
+    keys: BitArr!(for NUM_KEYCODES, in u8, Lsb0),
     uniforms: Uniforms,
     compute_bind_group_layout: wgpu::BindGroupLayout,
     compute_pipeline_layout: wgpu::PipelineLayout,
@@ -133,6 +138,16 @@ const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wg
         wgpu::BindGroupLayoutEntry {
             binding: 3,
             visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 4,
+            visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::StorageTexture {
                 access: wgpu::StorageTextureAccess::WriteOnly,
                 format: wgpu::TextureFormat::Rgba16Float,
@@ -141,7 +156,7 @@ const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wg
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
-            binding: 4,
+            binding: 5,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage {
@@ -153,7 +168,7 @@ const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wg
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
-            binding: 5,
+            binding: 6,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
                 multisampled: false,
@@ -163,7 +178,7 @@ const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wg
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
-            binding: 6,
+            binding: 7,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::StorageTexture {
                 access: wgpu::StorageTextureAccess::WriteOnly,
@@ -173,19 +188,19 @@ const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wg
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
-            binding: 7,
+            binding: 8,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
-            binding: 8,
+            binding: 9,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
-            binding: 9,
+            binding: 10,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
                 multisampled: false,
@@ -298,6 +313,12 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         }),
+        keys: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: std::mem::size_of::<bitvec::BitArr!(for NUM_KEYCODES, in u8)>() as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        }),
         storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: (4 * 4 * width * height).into(),
@@ -354,23 +375,24 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
             wgpu::BindGroupEntry { binding: 0, resource: uniforms.screen.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 1, resource: uniforms.time.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 2, resource: uniforms.mouse.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&uniforms.tex_screen.create_view(&Default::default())) },
-            wgpu::BindGroupEntry { binding: 4, resource: uniforms.storage_buffer.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&uniforms.tex_read.create_view(&wgpu::TextureViewDescriptor {
+            wgpu::BindGroupEntry { binding: 3, resource: uniforms.keys.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&uniforms.tex_screen.create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 5, resource: uniforms.storage_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&uniforms.tex_read.create_view(&wgpu::TextureViewDescriptor {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             })) },
-            wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&uniforms.tex_write.create_view(&wgpu::TextureViewDescriptor {
+            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&uniforms.tex_write.create_view(&wgpu::TextureViewDescriptor {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             })) },
-            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
-            wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
+            wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             })) },
-            wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&channel0.create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&channel0.create_view(&Default::default())) },
         ],
     })
 }
@@ -386,10 +408,10 @@ fn create_render_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout, 
     })
 }
 
-fn stage<T: bytemuck::Pod>(staging_belt: &mut wgpu::util::StagingBelt, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, data: &T, buffer: &wgpu::Buffer) {
-    let size = wgpu::BufferSize::new(std::mem::size_of::<T>() as u64).expect("size must be non-zero");
+fn stage(staging_belt: &mut wgpu::util::StagingBelt, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, data: &[u8], buffer: &wgpu::Buffer) {
+    let size = wgpu::BufferSize::new(data.len() as u64).expect("size must be non-zero");
     staging_belt.write_buffer(encoder, buffer, 0, size, device)
-        .copy_from_slice(bytemuck::bytes_of(data));
+        .copy_from_slice(data);
 }
 
 // https://llogiq.github.io/2016/09/24/newline.html
@@ -474,7 +496,8 @@ impl WgpuToyRenderer {
                 pos: [0, 0],
                 click: 0,
             },
-            staging_belt: wgpu::util::StagingBelt::new(0x100),
+            keys: bitarr![u8, Lsb0; 0; 256],
+            staging_belt: wgpu::util::StagingBelt::new(4096),
             wgpu,
             uniforms,
             compute_bind_group_layout,
@@ -489,9 +512,10 @@ impl WgpuToyRenderer {
             .get_current_texture()
             .expect("error getting texture from swap chain");
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
-        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.screen, &self.uniforms.screen);
-        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.time, &self.uniforms.time);
-        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.mouse, &self.uniforms.mouse);
+        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.screen), &self.uniforms.screen);
+        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.time), &self.uniforms.time);
+        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
+        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.keys.as_raw_slice(), &self.uniforms.keys);
         self.staging_belt.finish();
         for (pipeline, workgroup_size) in &self.compute_pipelines {
             {
@@ -594,6 +618,10 @@ impl WgpuToyRenderer {
 
     pub fn set_mouse_click(&mut self, click: bool) {
         self.mouse.click = if click {1} else {0};
+    }
+
+    pub fn set_keydown(&mut self, keycode: usize, keydown: bool) {
+        self.keys.set(keycode, keydown);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
