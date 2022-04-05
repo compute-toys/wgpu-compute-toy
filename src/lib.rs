@@ -23,12 +23,6 @@ pub struct WgpuContext {
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
-struct Screen {
-    size: [u32; 2],
-}
-
-#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
-#[repr(C)]
 struct Time {
     frame: u32,
     elapsed: f32,
@@ -42,7 +36,6 @@ struct Mouse {
 }
 
 struct Uniforms {
-    screen: wgpu::Buffer,
     time: wgpu::Buffer,
     mouse: wgpu::Buffer,
     keys: wgpu::Buffer,
@@ -84,7 +77,8 @@ const NUM_KEYCODES: usize = 256;
 #[wasm_bindgen]
 pub struct WgpuToyRenderer {
     wgpu: WgpuContext,
-    screen: Screen,
+    screen_width: u32,
+    screen_height: u32,
     time: Time,
     mouse: Mouse,
     keys: BitArr!(for NUM_KEYCODES, in u8, Lsb0),
@@ -105,16 +99,6 @@ pub struct WgpuToyRenderer {
 const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
     label: None,
     entries: &[
-        wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
         wgpu::BindGroupLayoutEntry {
             binding: 1,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -295,12 +279,6 @@ pub async fn init_wgpu(bind_id: String) -> WgpuContext {
 
 fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
     Uniforms {
-        screen: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: std::mem::size_of::<Screen>() as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
-            mapped_at_creation: false,
-        }),
         time: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: std::mem::size_of::<Time>() as u64,
@@ -315,7 +293,7 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
         }),
         keys: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: std::mem::size_of::<bitvec::BitArr!(for NUM_KEYCODES, in u8)>() as u64,
+            size: (NUM_KEYCODES / 8) as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         }),
@@ -372,7 +350,6 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
         label: None,
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: uniforms.screen.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 1, resource: uniforms.time.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 2, resource: uniforms.mouse.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 3, resource: uniforms.keys.as_entire_binding() },
@@ -485,9 +462,8 @@ impl WgpuToyRenderer {
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
             }),
-            screen: Screen {
-                size: [size.width, size.height],
-            },
+            screen_width: size.width,
+            screen_height: size.height,
             time: Time {
                 frame: 0,
                 elapsed: 0.,
@@ -512,7 +488,6 @@ impl WgpuToyRenderer {
             .get_current_texture()
             .expect("error getting texture from swap chain");
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
-        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.screen), &self.uniforms.screen);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.time), &self.uniforms.time);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.keys.as_raw_slice(), &self.uniforms.keys);
@@ -522,7 +497,7 @@ impl WgpuToyRenderer {
                 let mut compute_pass = encoder.begin_compute_pass(&Default::default());
                 compute_pass.set_pipeline(pipeline);
                 compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-                compute_pass.dispatch(self.screen.size[0].div_ceil(&workgroup_size[0]), self.screen.size[1].div_ceil(&workgroup_size[1]), 1);
+                compute_pass.dispatch(self.screen_width.div_ceil(&workgroup_size[0]), self.screen_height.div_ceil(&workgroup_size[1]), 1);
             }
             encoder.copy_texture_to_texture(
                 wgpu::ImageCopyTexture {
@@ -538,8 +513,8 @@ impl WgpuToyRenderer {
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::Extent3d {
-                    width: self.screen.size[0],
-                    height: self.screen.size[1],
+                    width: self.screen_width,
+                    height: self.screen_height,
                     depth_or_array_layers: 4,
                 });
         }
@@ -625,7 +600,8 @@ impl WgpuToyRenderer {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.screen.size = [width, height];
+        self.screen_width = width;
+        self.screen_height = height;
         self.time.frame = 0;
         self.uniforms = create_uniforms(&self.wgpu, width, height);
         self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);

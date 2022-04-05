@@ -12,18 +12,16 @@ type float2 = vec2<f32>;
 type float3 = vec3<f32>;
 type float4 = vec4<f32>;
 
-struct Screen { size: uint2 };
 struct Time { frame: uint, elapsed: float };
 struct Mouse { pos: uint2, click: int };
 
-@group(0) @binding(0) var<uniform> screen: Screen;
 @group(0) @binding(1) var<uniform> time: Time;
 @group(0) @binding(2) var<uniform> mouse: Mouse;
 @group(0) @binding(3) var<uniform> _keyboard: array<vec4<u32>,2>;
-@group(0) @binding(4) var screenImage: texture_storage_2d<rgba16float,write>;
-@group(0) @binding(5) var<storage,read_write> storageBuffer: array<atomic<i32>>;
-@group(0) @binding(6) var passIn: texture_2d_array<f32>;
-@group(0) @binding(7) var passOut: texture_storage_2d_array<rgba16float,write>;
+@group(0) @binding(4) var screen: texture_storage_2d<rgba16float,write>;
+@group(0) @binding(5) var<storage,read_write> atomic_storage: array<atomic<i32>>;
+@group(0) @binding(6) var pass_in: texture_2d_array<f32>;
+@group(0) @binding(7) var pass_out: texture_storage_2d_array<rgba16float,write>;
 @group(0) @binding(8) var nearest: sampler;
 @group(0) @binding(9) var bilinear: sampler;
 @group(0) @binding(10) var channel0: texture_2d<f32>;
