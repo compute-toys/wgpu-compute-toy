@@ -5,6 +5,8 @@ use naga::front::wgsl;
 use naga::front::wgsl::ParseError;
 use num::Integer;
 use bitvec::prelude::*;
+use lazy_static::lazy_static;
+use std::mem::{size_of, take};
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -85,6 +87,7 @@ pub struct WgpuToyRenderer {
     uniforms: Uniforms,
     compute_bind_group_layout: wgpu::BindGroupLayout,
     compute_pipeline_layout: wgpu::PipelineLayout,
+    last_compute_pipelines: Option<Vec<(wgpu::ComputePipeline, [u32; 3])>>,
     compute_pipelines: Vec<(wgpu::ComputePipeline, [u32; 3])>,
     compute_bind_group: wgpu::BindGroup,
     render_bind_group_layout: wgpu::BindGroupLayout,
@@ -95,6 +98,9 @@ pub struct WgpuToyRenderer {
     channel0: wgpu::Texture,
 }
 
+lazy_static! {
+    static ref SHADER_ERROR: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+}
 
 const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
     label: None,
@@ -281,13 +287,13 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
     Uniforms {
         time: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: std::mem::size_of::<Time>() as u64,
+            size: size_of::<Time>() as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         }),
         mouse: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: std::mem::size_of::<Mouse>() as u64,
+            size: size_of::<Mouse>() as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         }),
@@ -433,6 +439,7 @@ impl WgpuToyRenderer {
                 push_constant_ranges: &[],
             }),
             compute_bind_group: create_compute_bind_group(&wgpu, &compute_bind_group_layout, &uniforms, &channel0),
+            last_compute_pipelines: None,
             compute_pipelines: vec![],
             render_bind_group: create_render_bind_group(&wgpu, &render_bind_group_layout, &uniforms),
             render_pipeline: wgpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -492,6 +499,14 @@ impl WgpuToyRenderer {
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.keys.as_raw_slice(), &self.uniforms.keys);
         self.staging_belt.finish();
+        if take(&mut *SHADER_ERROR.lock().unwrap()) {
+            match take(&mut self.last_compute_pipelines) {
+                None => log::warn!("unable to rollback shader after error"),
+                Some(vec) => {
+                    self.compute_pipelines = vec;
+                }
+            }
+        }
         for (pipeline, workgroup_size) in &self.compute_pipelines {
             {
                 let mut compute_pass = encoder.begin_compute_pass(&Default::default());
@@ -567,6 +582,7 @@ impl WgpuToyRenderer {
                     label: None,
                     source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
                 });
+                self.last_compute_pipelines = Some(take(&mut self.compute_pipelines));
                 self.compute_pipelines = entry_points.iter().map(|entry_point| {
                     (self.wgpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                         label: None,
@@ -619,11 +635,15 @@ impl WgpuToyRenderer {
         let on_error_cb = self.on_error_cb.clone();
         self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
             let err = &e.to_string();
-            for cap in re.captures_iter(err) {
-                let row = cap[1].parse().unwrap_or(prelude_len);
-                let col = cap[2].parse().unwrap_or(0);
-                let summary = &cap[3];
-                on_error_cb.call(summary, row - prelude_len, col);
+            match re.captures(err) {
+                None =>  log::error!("{e}"),
+                Some(cap) => {
+                    let row = cap[1].parse().unwrap_or(prelude_len);
+                    let col = cap[2].parse().unwrap_or(0);
+                    let summary = &cap[3];
+                    on_error_cb.call(summary, row - prelude_len, col);
+                    *SHADER_ERROR.lock().unwrap() = true;
+                }
             }
         });
     }
