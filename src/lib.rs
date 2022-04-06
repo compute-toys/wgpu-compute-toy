@@ -41,6 +41,7 @@ struct Uniforms {
     time: wgpu::Buffer,
     mouse: wgpu::Buffer,
     keys: wgpu::Buffer,
+    custom: wgpu::Buffer,
     storage_buffer: wgpu::Buffer,
     tex_read: wgpu::Texture,
     tex_write: wgpu::Texture,
@@ -75,6 +76,7 @@ unsafe impl Send for ErrorCallback {}
 unsafe impl Sync for ErrorCallback {}
 
 const NUM_KEYCODES: usize = 256;
+const MAX_CUSTOM_PARAMS: usize = 16;
 
 #[wasm_bindgen]
 pub struct WgpuToyRenderer {
@@ -84,6 +86,7 @@ pub struct WgpuToyRenderer {
     time: Time,
     mouse: Mouse,
     keys: BitArr!(for NUM_KEYCODES, in u8, Lsb0),
+    custom: std::collections::BTreeMap<String, f32>,
     uniforms: Uniforms,
     compute_bind_group_layout: wgpu::BindGroupLayout,
     compute_pipeline_layout: wgpu::PipelineLayout,
@@ -105,6 +108,16 @@ lazy_static! {
 const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
     label: None,
     entries: &[
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
         wgpu::BindGroupLayoutEntry {
             binding: 1,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -303,6 +316,12 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         }),
+        custom: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (MAX_CUSTOM_PARAMS * size_of::<f32>()) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        }),
         storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: (4 * 4 * width * height).into(),
@@ -356,6 +375,7 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
         label: None,
         layout,
         entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: uniforms.custom.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 1, resource: uniforms.time.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 2, resource: uniforms.mouse.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 3, resource: uniforms.keys.as_entire_binding() },
@@ -432,6 +452,9 @@ impl WgpuToyRenderer {
             }
         );
 
+        let mut custom = std::collections::BTreeMap::new();
+        custom.insert("_dummy".into(), 0.); // just to avoid creating an empty struct in wgsl
+
         WgpuToyRenderer {
             compute_pipeline_layout: wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
@@ -487,6 +510,7 @@ impl WgpuToyRenderer {
             render_bind_group_layout,
             on_error_cb: ErrorCallback(None),
             channel0,
+            custom,
         }
     }
 
@@ -495,6 +519,8 @@ impl WgpuToyRenderer {
             .get_current_texture()
             .expect("error getting texture from swap chain");
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
+        let custom_bytes: Vec<u8> = self.custom.values().flat_map(|x| bytemuck::bytes_of(x).iter().copied()).collect();
+        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &custom_bytes, &self.uniforms.custom);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.time), &self.uniforms.time);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.keys.as_raw_slice(), &self.uniforms.keys);
@@ -562,16 +588,27 @@ impl WgpuToyRenderer {
         frame.present();
     }
 
+    fn prelude(&self) -> String {
+        let mut s: String = include_str!("prelude.wgsl").into();
+        s.push_str("struct Custom {");
+        for name in self.custom.keys() {
+            s.push_str(&name);
+            s.push_str(": float,");
+        }
+        s.push_str("};");
+        s.push_str("@group(0) @binding(0) var<uniform> custom: Custom;");
+        return s;
+    }
+
     fn handle_error(&self, e: ParseError, wgsl: &str) {
-        let prelude: String = include_str!("prelude.wgsl").into();
-        let prelude_len = count_newlines(&prelude); // in case we need to report errors
+        let prelude_len = count_newlines(&self.prelude()); // in case we need to report errors
         let (row, col) = e.location(&wgsl);
         let summary = e.emit_to_string(&wgsl);
         self.on_error_cb.call(&summary, row - prelude_len, col);
     }
 
     pub fn set_shader(&mut self, shader: &str) {
-        let mut wgsl: String = include_str!("prelude.wgsl").into();
+        let mut wgsl: String = self.prelude();
         let shader: String = shader.into();
         wgsl.push_str(&shader);
         match wgsl::parse_str(&wgsl) {
@@ -615,6 +652,10 @@ impl WgpuToyRenderer {
         self.keys.set(keycode, keydown);
     }
 
+    pub fn set_custom_float(&mut self, name: &str, value: f32) {
+        self.custom.insert(name.into(), value);
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.screen_width = width;
         self.screen_height = height;
@@ -629,8 +670,7 @@ impl WgpuToyRenderer {
         self.on_error_cb = ErrorCallback(Some(callback));
 
         // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
-        let prelude: String = include_str!("prelude.wgsl").into();
-        let prelude_len = count_newlines(&prelude);
+        let prelude_len = count_newlines(&self.prelude());
         let re = regex::Regex::new(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader").unwrap();
         let on_error_cb = self.on_error_cb.clone();
         self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
