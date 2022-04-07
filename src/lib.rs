@@ -5,8 +5,8 @@ use naga::front::wgsl;
 use naga::front::wgsl::ParseError;
 use num::Integer;
 use bitvec::prelude::*;
-use lazy_static::lazy_static;
 use std::mem::{size_of, take};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -101,9 +101,7 @@ pub struct WgpuToyRenderer {
     channel0: wgpu::Texture,
 }
 
-lazy_static! {
-    static ref SHADER_ERROR: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
-}
+static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
 const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
     label: None,
@@ -525,7 +523,7 @@ impl WgpuToyRenderer {
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.keys.as_raw_slice(), &self.uniforms.keys);
         self.staging_belt.finish();
-        if take(&mut *SHADER_ERROR.lock().unwrap()) {
+        if SHADER_ERROR.swap(false, Ordering::SeqCst) {
             match take(&mut self.last_compute_pipelines) {
                 None => log::warn!("unable to rollback shader after error"),
                 Some(vec) => {
@@ -682,7 +680,7 @@ impl WgpuToyRenderer {
                     let col = cap[2].parse().unwrap_or(0);
                     let summary = &cap[3];
                     on_error_cb.call(summary, row - prelude_len, col);
-                    *SHADER_ERROR.lock().unwrap() = true;
+                    SHADER_ERROR.store(true, Ordering::SeqCst);
                 }
             }
         });
