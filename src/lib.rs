@@ -602,7 +602,7 @@ impl WgpuToyRenderer {
         let prelude_len = count_newlines(&self.prelude()); // in case we need to report errors
         let (row, col) = e.location(&wgsl);
         let summary = e.emit_to_string(&wgsl);
-        self.on_error_cb.call(&summary, row - prelude_len, col);
+        self.on_error_cb.call(&summary, if row >= prelude_len { row - prelude_len } else { 0 }, col);
     }
 
     pub fn set_shader(&mut self, shader: &str) {
@@ -679,7 +679,7 @@ impl WgpuToyRenderer {
                     let row = cap[1].parse().unwrap_or(prelude_len);
                     let col = cap[2].parse().unwrap_or(0);
                     let summary = &cap[3];
-                    on_error_cb.call(summary, row - prelude_len, col);
+                    on_error_cb.call(summary, if row >= prelude_len { row - prelude_len } else { 0 }, col);
                     SHADER_ERROR.store(true, Ordering::SeqCst);
                 }
             }
