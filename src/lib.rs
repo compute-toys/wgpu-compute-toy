@@ -99,13 +99,13 @@ pub struct WgpuToyRenderer {
     staging_belt: wgpu::util::StagingBelt,
     on_error_cb: ErrorCallback,
     channel0: wgpu::Texture,
+    pass_f32: bool,
 }
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
-const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
-    label: None,
-    entries: &[
+fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 11] {
+    [
         wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -173,7 +173,7 @@ const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wg
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
                 multisampled: false,
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                sample_type: wgpu::TextureSampleType::Float { filterable: !pass_f32 },
                 view_dimension: wgpu::TextureViewDimension::D2Array,
             },
             count: None,
@@ -183,7 +183,7 @@ const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wg
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::StorageTexture {
                 access: wgpu::StorageTextureAccess::WriteOnly,
-                format: wgpu::TextureFormat::Rgba16Float,
+                format: if pass_f32 { wgpu::TextureFormat::Rgba32Float } else { wgpu::TextureFormat::Rgba16Float },
                 view_dimension: wgpu::TextureViewDimension::D2Array,
             },
             count: None,
@@ -210,8 +210,8 @@ const COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wg
             },
             count: None,
         },
-    ],
-};
+    ]
+}
 
 const RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
     label: None,
@@ -294,7 +294,7 @@ pub async fn init_wgpu(bind_id: String) -> WgpuContext {
     }
 }
 
-fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
+fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) -> Uniforms {
     Uniforms {
         time: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -336,7 +336,7 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
+            format: if pass_f32 { wgpu::TextureFormat::Rgba32Float } else { wgpu::TextureFormat::Rgba16Float },
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
         }),
         tex_write: wgpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -349,7 +349,7 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32) -> Uniforms {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
+            format: if pass_f32 { wgpu::TextureFormat::Rgba32Float } else { wgpu::TextureFormat::Rgba16Float },
             usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
         }),
         tex_screen: wgpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -425,8 +425,11 @@ impl WgpuToyRenderer {
     #[wasm_bindgen(constructor)]
     pub fn new(wgpu: WgpuContext) -> WgpuToyRenderer {
         let size = wgpu.window.inner_size();
-        let uniforms = create_uniforms(&wgpu, size.width, size.height);
-        let compute_bind_group_layout = wgpu.device.create_bind_group_layout(&COMPUTE_BIND_GROUP_LAYOUT_DESCRIPTOR);
+        let uniforms = create_uniforms(&wgpu, size.width, size.height, false);
+        let compute_bind_group_layout = wgpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &compute_bind_group_layout_entries(false),
+        });
         let render_shader = wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
@@ -509,6 +512,7 @@ impl WgpuToyRenderer {
             on_error_cb: ErrorCallback(None),
             channel0,
             custom,
+            pass_f32: false,
         }
     }
 
@@ -587,7 +591,25 @@ impl WgpuToyRenderer {
     }
 
     fn prelude(&self) -> String {
-        let mut s: String = include_str!("prelude.wgsl").into();
+        let mut s = String::new();
+        s.push_str(r#"
+            type int = i32;
+            type uint = u32;
+            type float = f32;
+
+            type int2 = vec2<i32>;
+            type int3 = vec3<i32>;
+            type int4 = vec4<i32>;
+            type uint2 = vec2<u32>;
+            type uint3 = vec3<u32>;
+            type uint4 = vec4<u32>;
+            type float2 = vec2<f32>;
+            type float3 = vec3<f32>;
+            type float4 = vec4<f32>;
+
+            struct Time { frame: uint, elapsed: float };
+            struct Mouse { pos: uint2, click: int };
+        "#);
         s.push_str("struct Custom {");
         for name in self.custom.keys() {
             s.push_str(&name);
@@ -595,6 +617,24 @@ impl WgpuToyRenderer {
         }
         s.push_str("};");
         s.push_str("@group(0) @binding(0) var<uniform> custom: Custom;");
+        let pass_format = if self.pass_f32 { "rgba32float" } else { "rgba16float" };
+        s.push_str(&format!(r#"
+            @group(0) @binding(1) var<uniform> time: Time;
+            @group(0) @binding(2) var<uniform> mouse: Mouse;
+            @group(0) @binding(3) var<uniform> _keyboard: array<vec4<u32>,2>;
+            @group(0) @binding(4) var screen: texture_storage_2d<rgba16float,write>;
+            @group(0) @binding(5) var<storage,read_write> atomic_storage: array<atomic<i32>>;
+            @group(0) @binding(6) var pass_in: texture_2d_array<f32>;
+            @group(0) @binding(7) var pass_out: texture_storage_2d_array<{pass_format},write>;
+            @group(0) @binding(8) var nearest: sampler;
+            @group(0) @binding(9) var bilinear: sampler;
+            @group(0) @binding(10) var channel0: texture_2d<f32>;
+        "#));
+        s.push_str(r#"
+            fn keyDown(keycode: uint) -> bool {
+                return ((_keyboard[keycode / 128u][(keycode % 128u) / 32u] >> (keycode % 32u)) & 1u) == 1u;
+            }
+        "#);
         return s;
     }
 
@@ -654,11 +694,24 @@ impl WgpuToyRenderer {
         self.custom.insert(name.into(), value);
     }
 
+    pub fn set_pass_f32(&mut self, pass_f32: bool) {
+        self.pass_f32 = pass_f32;
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.screen_width = width;
         self.screen_height = height;
         self.time.frame = 0;
-        self.uniforms = create_uniforms(&self.wgpu, width, height);
+        self.uniforms = create_uniforms(&self.wgpu, width, height, self.pass_f32);
+        self.compute_bind_group_layout = self.wgpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &compute_bind_group_layout_entries(self.pass_f32),
+        });
+        self.compute_pipeline_layout = self.wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&self.compute_bind_group_layout],
+            push_constant_ranges: &[],
+        });
         self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);
         self.render_bind_group = create_render_bind_group(&self.wgpu, &self.render_bind_group_layout, &self.uniforms);
         self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
