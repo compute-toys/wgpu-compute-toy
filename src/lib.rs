@@ -21,6 +21,7 @@ pub struct WgpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface,
+    surface_format: wgpu::TextureFormat,
 }
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
@@ -63,7 +64,7 @@ impl ErrorCallback {
                     &JsValue::from(col)
                 );
                 match res {
-                    Err(error) => log::error!("Error calling registered error callback, error: {:?}", error),
+                    Err(error) => log::error!("Error calling registered error callback: {error:?}"),
                     _ => ()
                 };
             }
@@ -277,10 +278,10 @@ pub async fn init_wgpu(bind_id: String) -> WgpuContext {
         .await
         .expect("error creating device");
     let size = window.inner_size();
-    let format = surface.get_preferred_format(&adapter).unwrap();
+    let surface_format = surface.get_preferred_format(&adapter).unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
     surface.configure(&device, &wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: format,
+        format: surface_format,
         width: size.width,
         height: size.height,
         present_mode: wgpu::PresentMode::Fifo, // vsync
@@ -291,6 +292,7 @@ pub async fn init_wgpu(bind_id: String) -> WgpuContext {
         device,
         queue,
         surface,
+        surface_format,
     }
 }
 
@@ -435,7 +437,6 @@ impl WgpuToyRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
         });
         let render_bind_group_layout = wgpu.device.create_bind_group_layout(&RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR);
-        let format = wgpu.surface.get_preferred_format(&wgpu.adapter).unwrap();
 
         let channel0 = wgpu.device.create_texture(
             &wgpu::TextureDescriptor {
@@ -480,13 +481,13 @@ impl WgpuToyRenderer {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &render_shader,
-                    entry_point: match format {
+                    entry_point: match wgpu.surface_format {
                         // TODO use sRGB viewFormats instead once the API stabilises?
                         wgpu::TextureFormat::Bgra8Unorm => "fs_main_srgb",
                         wgpu::TextureFormat::Bgra8UnormSrgb => "fs_main",
                         _ => panic!("unrecognised surface format")
                     },
-                    targets: &[format.into()],
+                    targets: &[wgpu.surface_format.into()],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
@@ -564,9 +565,8 @@ impl WgpuToyRenderer {
         self.time.frame += 1;
         // blit the output texture to the framebuffer
         {
-            let format = self.wgpu.surface.get_preferred_format(&self.wgpu.adapter).unwrap();
             let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-                format: Some(format),
+                format: Some(self.wgpu.surface_format),
                 ..Default::default()
             });
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -668,7 +668,7 @@ impl WgpuToyRenderer {
                 }).collect();
             },
             Err(e) => {
-                log::error!("Error parsing WGSL: {}", e);
+                log::error!("Error parsing WGSL: {e}");
                 self.handle_error(e, &wgsl);
             },
         }
@@ -722,7 +722,7 @@ impl WgpuToyRenderer {
 
         // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
         let prelude_len = count_newlines(&self.prelude());
-        let re = regex::Regex::new(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader").unwrap();
+        let re = lazy_regex::regex!(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader");
         let on_error_cb = self.on_error_cb.clone();
         self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
             let err = &e.to_string();
@@ -740,42 +740,46 @@ impl WgpuToyRenderer {
     }
 
     pub fn load_channel(&mut self, bytes: &[u8]) {
-        let im = image::load_from_memory(bytes).unwrap();
-        use image::GenericImageView;
-        let (width, height) = im.dimensions();
-        self.channel0 = self.wgpu.device.create_texture(
-            &wgpu::TextureDescriptor {
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                label: None,
+        match image::load_from_memory(bytes) {
+            Err(e) => log::error!("load_channel: {e}"),
+            Ok(im) => {
+                use image::GenericImageView;
+                let (width, height) = im.dimensions();
+                self.channel0 = self.wgpu.device.create_texture(
+                    &wgpu::TextureDescriptor {
+                        size: wgpu::Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        label: None,
+                    }
+                );
+                self.wgpu.queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &self.channel0,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &im.to_rgba8(),
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: std::num::NonZeroU32::new(4 * width),
+                        rows_per_image: std::num::NonZeroU32::new(height),
+                    },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                );
             }
-        );
-        self.wgpu.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &self.channel0,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &im.to_rgba8(),
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(4 * width),
-                rows_per_image: std::num::NonZeroU32::new(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
+        }
     }
 }
