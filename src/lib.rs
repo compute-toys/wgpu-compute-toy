@@ -779,6 +779,7 @@ impl WgpuToyRenderer {
                         depth_or_array_layers: 1,
                     },
                 );
+                self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);
             }
         }
     }
