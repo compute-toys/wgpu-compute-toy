@@ -93,13 +93,11 @@ pub struct WgpuToyRenderer {
     last_compute_pipelines: Option<Vec<(wgpu::ComputePipeline, [u32; 3])>>,
     compute_pipelines: Vec<(wgpu::ComputePipeline, [u32; 3])>,
     compute_bind_group: wgpu::BindGroup,
-    render_bind_group_layout: wgpu::BindGroupLayout,
-    render_pipeline: wgpu::RenderPipeline,
-    render_bind_group: wgpu::BindGroup,
     staging_belt: wgpu::util::StagingBelt,
     on_error_cb: ErrorCallback,
     channel0: wgpu::Texture,
     pass_f32: bool,
+    screen_blitter: Blitter,
 }
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
@@ -397,15 +395,105 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
     })
 }
 
-fn create_render_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout, uniforms: &Uniforms) -> wgpu::BindGroup {
-    wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&uniforms.tex_screen.create_view(&Default::default())) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
-        ],
-    })
+enum ColourSpace {
+    Linear,
+    Rgbe,
+}
+
+struct Blitter {
+    render_pipeline: wgpu::RenderPipeline,
+    render_bind_group: wgpu::BindGroup,
+    dest_format: wgpu::TextureFormat,
+}
+
+impl Blitter {
+    fn new(wgpu: &WgpuContext, src: &wgpu::Texture, src_space: ColourSpace, dest_format: wgpu::TextureFormat) -> Self {
+        let render_shader = wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
+        });
+        let render_bind_group_layout = wgpu.device.create_bind_group_layout(&RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR);
+        Blitter {
+            render_bind_group: wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &render_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src.create_view(&Default::default())) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
+                ],
+            }),
+            render_pipeline: wgpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: None,
+                layout: Some(&wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: None,
+                    bind_group_layouts: &[&render_bind_group_layout],
+                    push_constant_ranges: &[],
+                })),
+                vertex: wgpu::VertexState {
+                    module: &render_shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &render_shader,
+                    entry_point: match (src_space, dest_format) {
+                        // FIXME use sRGB viewFormats instead once the API stabilises
+                        (ColourSpace::Linear, wgpu::TextureFormat::Bgra8Unorm) => "fs_main_linear_to_srgb",
+                        (ColourSpace::Linear, wgpu::TextureFormat::Bgra8UnormSrgb) => "fs_main", // format automatically performs sRGB encoding
+                        (ColourSpace::Rgbe, wgpu::TextureFormat::Rgba16Float) => "fs_main_rgbe_to_linear",
+                        _ => panic!("Blitter: unrecognised conversion")
+                    },
+                    targets: &[dest_format.into()],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            }),
+            dest_format,
+        }
+    }
+
+    fn blit(&self, encoder: &mut wgpu::CommandEncoder, dest: &wgpu::Texture) {
+        let view = &dest.create_view(&Default::default());
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                    store: true,
+                },
+            }],
+            depth_stencil_attachment: None,
+        });
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.render_bind_group, &[]);
+        render_pass.draw(0..3, 0..1);
+    }
+
+    fn create_texture(&self, wgpu: &WgpuContext, width: u32, height: u32) -> wgpu::Texture {
+        let texture = wgpu.device.create_texture(
+            &wgpu::TextureDescriptor {
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.dest_format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                label: None,
+            }
+        );
+        let mut encoder = wgpu.device.create_command_encoder(&Default::default());
+        self.blit(&mut encoder, &texture);
+        wgpu.queue.submit(Some(encoder.finish()));
+        texture
+    }
 }
 
 fn stage(staging_belt: &mut wgpu::util::StagingBelt, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, data: &[u8], buffer: &wgpu::Buffer) {
@@ -431,11 +519,6 @@ impl WgpuToyRenderer {
             label: None,
             entries: &compute_bind_group_layout_entries(false),
         });
-        let render_shader = wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
-        });
-        let render_bind_group_layout = wgpu.device.create_bind_group_layout(&RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR);
 
         let channel0 = wgpu.device.create_texture(
             &wgpu::TextureDescriptor {
@@ -465,34 +548,6 @@ impl WgpuToyRenderer {
             compute_bind_group: create_compute_bind_group(&wgpu, &compute_bind_group_layout, &uniforms, &channel0),
             last_compute_pipelines: None,
             compute_pipelines: vec![],
-            render_bind_group: create_render_bind_group(&wgpu, &render_bind_group_layout, &uniforms),
-            render_pipeline: wgpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: Some(&wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: None,
-                    bind_group_layouts: &[&render_bind_group_layout],
-                    push_constant_ranges: &[],
-                })),
-                vertex: wgpu::VertexState {
-                    module: &render_shader,
-                    entry_point: "vs_main",
-                    buffers: &[],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &render_shader,
-                    entry_point: match wgpu.surface_format {
-                        // TODO use sRGB viewFormats instead once the API stabilises?
-                        wgpu::TextureFormat::Bgra8Unorm => "fs_main_srgb",
-                        wgpu::TextureFormat::Bgra8UnormSrgb => "fs_main",
-                        _ => panic!("unrecognised surface format")
-                    },
-                    targets: &[wgpu.surface_format.into()],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            }),
             screen_width: size.width,
             screen_height: size.height,
             time: Time {
@@ -505,10 +560,10 @@ impl WgpuToyRenderer {
             },
             keys: bitarr![u8, Lsb0; 0; 256],
             staging_belt: wgpu::util::StagingBelt::new(4096),
+            screen_blitter: Blitter::new(&wgpu, &uniforms.tex_screen, ColourSpace::Linear, wgpu.surface_format),
             wgpu,
             uniforms,
             compute_bind_group_layout,
-            render_bind_group_layout,
             on_error_cb: ErrorCallback(None),
             channel0,
             custom,
@@ -566,28 +621,7 @@ impl WgpuToyRenderer {
                 });
         }
         self.time.frame += 1;
-        // blit the output texture to the framebuffer
-        {
-            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-                format: Some(self.wgpu.surface_format),
-                ..Default::default()
-            });
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                        store: true,
-                    },
-                }],
-                depth_stencil_attachment: None,
-            });
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.render_bind_group, &[]);
-            render_pass.draw(0..3, 0..1);
-        }
+        self.screen_blitter.blit(&mut encoder, &frame.texture);
         self.wgpu.queue.submit(Some(encoder.finish()));
         wasm_bindgen_futures::spawn_local(self.staging_belt.recall());
         frame.present();
@@ -716,7 +750,7 @@ impl WgpuToyRenderer {
             push_constant_ranges: &[],
         });
         self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);
-        self.render_bind_group = create_render_bind_group(&self.wgpu, &self.render_bind_group_layout, &self.uniforms);
+        self.screen_blitter = Blitter::new(&self.wgpu, &self.uniforms.tex_screen, ColourSpace::Linear, self.wgpu.surface_format);
         self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
     }
 
@@ -746,44 +780,61 @@ impl WgpuToyRenderer {
         match image::load_from_memory(bytes) {
             Err(e) => log::error!("load_channel: {e}"),
             Ok(im) => {
-                use image::GenericImageView;
-                let (width, height) = im.dimensions();
-                self.channel0 = self.wgpu.device.create_texture(
-                    &wgpu::TextureDescriptor {
-                        size: wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                        label: None,
-                    }
-                );
-                self.wgpu.queue.write_texture(
-                    wgpu::ImageCopyTexture {
-                        texture: &self.channel0,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    &im.to_rgba8(),
-                    wgpu::ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: std::num::NonZeroU32::new(4 * width),
-                        rows_per_image: std::num::NonZeroU32::new(height),
-                    },
-                    wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                );
+                self.channel0 = create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8UnormSrgb);
                 self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);
             }
         }
     }
+
+    pub fn load_channel_rgbe(&mut self, bytes: &[u8]) {
+        match image::load_from_memory(bytes) {
+            Err(e) => log::error!("load_channel_rgbe: {e}"),
+            Ok(im) => {
+                use image::GenericImageView;
+                let (width, height) = im.dimensions();
+                self.channel0 = Blitter::new(
+                    &self.wgpu,
+                    &create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8Unorm),
+                    ColourSpace::Rgbe,
+                    wgpu::TextureFormat::Rgba16Float,
+                ).create_texture(&self.wgpu, width, height);
+                self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);
+            }
+        }
+    }
+}
+
+fn create_texture_from_image(wgpu: &WgpuContext, im: &image::DynamicImage, format: wgpu::TextureFormat) -> wgpu::Texture {
+    use image::GenericImageView;
+    let (width, height) = im.dimensions();
+    let texture = wgpu.device.create_texture(
+        &wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            label: None,
+        }
+    );
+    wgpu.queue.write_texture(
+        texture.as_image_copy(),
+        &im.to_rgba8(),
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: std::num::NonZeroU32::new(4 * width),
+            rows_per_image: std::num::NonZeroU32::new(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    texture
 }

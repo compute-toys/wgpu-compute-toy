@@ -26,12 +26,33 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 @group(0) @binding(0) var r_color: texture_2d<f32>;
 @group(0) @binding(1) var r_sampler: sampler;
 
+fn srgb_to_linear(rgb: vec3<f32>) -> vec3<f32> {
+    return select(
+        pow((rgb + 0.055) * (1.0 / 1.055), vec3<f32>(2.4)),
+        rgb * (1.0/12.92),
+        rgb <= vec3<f32>(0.04045));
+}
+
+fn linear_to_srgb(rgb: vec3<f32>) -> vec3<f32> {
+    return select(
+        1.055 * pow(rgb, vec3(1.0 / 2.4)) - 0.055,
+        rgb * 12.92,
+        rgb <= vec3<f32>(0.0031308));
+}
+
 @stage(fragment)
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(r_color, r_sampler, in.tex_coords);
 }
 
 @stage(fragment)
-fn fs_main_srgb(in: VertexOutput) -> @location(0) vec4<f32> {
-    return pow(textureSample(r_color, r_sampler, in.tex_coords), vec4<f32>(1./2.2));
+fn fs_main_linear_to_srgb(in: VertexOutput) -> @location(0) vec4<f32> {
+    let rgba = textureSample(r_color, r_sampler, in.tex_coords);
+    return vec4<f32>(linear_to_srgb(rgba.rgb), rgba.a);
+}
+
+@stage(fragment)
+fn fs_main_rgbe_to_linear(in: VertexOutput) -> @location(0) vec4<f32> {
+    let rgbe = textureSample(r_color, r_sampler, in.tex_coords);
+    return vec4<f32>(rgbe.rgb * exp2(rgbe.a * 255. - 128.), 1.);
 }
