@@ -237,19 +237,20 @@ const RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgp
 };
 
 #[cfg(target_arch = "wasm32")]
-fn init_window(bind_id: String) -> Option<winit::window::Window> {
-    console_log::init_with_level(log::Level::Info).ok()?;
-    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+fn init_window(bind_id: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
+    console_log::init(); // FIXME only do this once
+    utils::set_panic_hook();
     let event_loop = winit::event_loop::EventLoop::new();
-    let win = web_sys::window()?;
-    let doc = win.document()?;
-    let element = doc.get_element_by_id(&bind_id)?;
+    let win = web_sys::window().ok_or("window is None")?;
+    let doc = win.document().ok_or("document is None")?;
+    let element = doc.get_element_by_id(&bind_id).ok_or(format!("cannot find element {bind_id}"))?;
     use wasm_bindgen::JsCast;
-    let canvas = element.dyn_into::<web_sys::HtmlCanvasElement>().ok()?;
+    let canvas = element.dyn_into::<web_sys::HtmlCanvasElement>().or(Err("cannot cast to canvas"))?;
     use winit::platform::web::WindowBuilderExtWebSys;
-    winit::window::WindowBuilder::new()
+    let window = winit::window::WindowBuilder::new()
         .with_canvas(Some(canvas))
-        .build(&event_loop).ok()
+        .build(&event_loop)?;
+    Ok(window)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
