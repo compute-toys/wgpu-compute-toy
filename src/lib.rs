@@ -1,5 +1,8 @@
 mod utils;
+mod blit;
+mod context;
 
+use context::WgpuContext;
 use wasm_bindgen::prelude::*;
 use naga::front::wgsl;
 use naga::front::wgsl::ParseError;
@@ -13,15 +16,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
-#[wasm_bindgen]
-pub struct WgpuContext {
-    window: winit::window::Window,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    surface: wgpu::Surface,
-    surface_format: wgpu::TextureFormat,
-}
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
@@ -97,7 +91,7 @@ pub struct WgpuToyRenderer {
     on_error_cb: ErrorCallback,
     channels: [wgpu::Texture; 2],
     pass_f32: bool,
-    screen_blitter: Blitter,
+    screen_blitter: blit::Blitter,
 }
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
@@ -221,86 +215,6 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
     ]
 }
 
-const RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
-    label: None,
-    entries: &[
-        wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                multisampled: false,
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: wgpu::TextureViewDimension::D2,
-            },
-            count: None,
-        },
-        wgpu::BindGroupLayoutEntry {
-            binding: 1,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-            count: None,
-        },
-    ],
-};
-
-#[cfg(target_arch = "wasm32")]
-fn init_window(bind_id: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
-    console_log::init(); // FIXME only do this once
-    utils::set_panic_hook();
-    let event_loop = winit::event_loop::EventLoop::new();
-    let win = web_sys::window().ok_or("window is None")?;
-    let doc = win.document().ok_or("document is None")?;
-    let element = doc.get_element_by_id(&bind_id).ok_or(format!("cannot find element {bind_id}"))?;
-    use wasm_bindgen::JsCast;
-    let canvas = element.dyn_into::<web_sys::HtmlCanvasElement>().or(Err("cannot cast to canvas"))?;
-    use winit::platform::web::WindowBuilderExtWebSys;
-    let window = winit::window::WindowBuilder::new()
-        .with_canvas(Some(canvas))
-        .build(&event_loop)?;
-    Ok(window)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn init_window(_: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
-    env_logger::init();
-    let event_loop = winit::event_loop::EventLoop::new();
-    winit::window::Window::new(&event_loop).map_err(Box::from)
-}
-
-// FIXME: async fn(&str) doesn't currently work with wasm_bindgen: https://stackoverflow.com/a/63655324/78204
-#[wasm_bindgen]
-pub async fn init_wgpu(bind_id: String) -> Result<WgpuContext, String> {
-    let window = init_window(bind_id).map_err(|e| e.to_string())?;
-    let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
-    let surface = unsafe { instance.create_surface(&window) };
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: Default::default(),
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-        })
-        .await.ok_or("unable to create adapter")?;
-    let (device, queue) = adapter
-        .request_device(&Default::default(), None)
-        .await.map_err(|e| e.to_string())?;
-    let size = window.inner_size();
-    let surface_format = surface.get_preferred_format(&adapter).unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
-    surface.configure(&device, &wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: surface_format,
-        width: size.width,
-        height: size.height,
-        present_mode: wgpu::PresentMode::Fifo, // vsync
-    });
-    Ok(WgpuContext {
-        window,
-        device,
-        queue,
-        surface,
-        surface_format,
-    })
-}
-
 fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) -> Uniforms {
     Uniforms {
         time: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -406,107 +320,6 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
     })
 }
 
-enum ColourSpace {
-    Linear,
-    Rgbe,
-}
-
-struct Blitter {
-    render_pipeline: wgpu::RenderPipeline,
-    render_bind_group: wgpu::BindGroup,
-    dest_format: wgpu::TextureFormat,
-}
-
-impl Blitter {
-    fn new(wgpu: &WgpuContext, src: &wgpu::Texture, src_space: ColourSpace, dest_format: wgpu::TextureFormat) -> Self {
-        let render_shader = wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
-        });
-        let render_bind_group_layout = wgpu.device.create_bind_group_layout(&RENDER_BIND_GROUP_LAYOUT_DESCRIPTOR);
-        Blitter {
-            render_bind_group: wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &render_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src.create_view(&Default::default())) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
-                ],
-            }),
-            render_pipeline: wgpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: Some(&wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: None,
-                    bind_group_layouts: &[&render_bind_group_layout],
-                    push_constant_ranges: &[],
-                })),
-                vertex: wgpu::VertexState {
-                    module: &render_shader,
-                    entry_point: "vs_main",
-                    buffers: &[],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &render_shader,
-                    entry_point: match (src_space, dest_format) {
-                        // FIXME use sRGB viewFormats instead once the API stabilises
-                        (ColourSpace::Linear, wgpu::TextureFormat::Bgra8Unorm) => "fs_main_linear_to_srgb",
-                        (ColourSpace::Linear, wgpu::TextureFormat::Bgra8UnormSrgb) => "fs_main", // format automatically performs sRGB encoding
-                        (ColourSpace::Rgbe, wgpu::TextureFormat::Rgba16Float) => "fs_main_rgbe_to_linear",
-                        _ => panic!("Blitter: unrecognised conversion")
-                    },
-                    targets: &[dest_format.into()],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            }),
-            dest_format,
-        }
-    }
-
-    fn blit(&self, encoder: &mut wgpu::CommandEncoder, dest: &wgpu::Texture) {
-        let view = &dest.create_view(&Default::default());
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                    store: true,
-                },
-            }],
-            depth_stencil_attachment: None,
-        });
-        render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.render_bind_group, &[]);
-        render_pass.draw(0..3, 0..1);
-    }
-
-    fn create_texture(&self, wgpu: &WgpuContext, width: u32, height: u32) -> wgpu::Texture {
-        let texture = wgpu.device.create_texture(
-            &wgpu::TextureDescriptor {
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.dest_format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-                label: None,
-            }
-        );
-        let mut encoder = wgpu.device.create_command_encoder(&Default::default());
-        self.blit(&mut encoder, &texture);
-        wgpu.queue.submit(Some(encoder.finish()));
-        texture
-    }
-}
-
 fn stage(staging_belt: &mut wgpu::util::StagingBelt, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, data: &[u8], buffer: &wgpu::Buffer) {
     match wgpu::BufferSize::new(data.len() as u64) {
         None => log::warn!("no data to stage"),
@@ -573,7 +386,7 @@ impl WgpuToyRenderer {
             },
             keys: bitarr![u8, Lsb0; 0; 256],
             staging_belt: wgpu::util::StagingBelt::new(4096),
-            screen_blitter: Blitter::new(&wgpu, &uniforms.tex_screen, ColourSpace::Linear, wgpu.surface_format),
+            screen_blitter: blit::Blitter::new(&wgpu, &uniforms.tex_screen, blit::ColourSpace::Linear, wgpu.surface_format),
             wgpu,
             uniforms,
             compute_bind_group_layout,
@@ -764,7 +577,7 @@ impl WgpuToyRenderer {
             push_constant_ranges: &[],
         });
         self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
-        self.screen_blitter = Blitter::new(&self.wgpu, &self.uniforms.tex_screen, ColourSpace::Linear, self.wgpu.surface_format);
+        self.screen_blitter = blit::Blitter::new(&self.wgpu, &self.uniforms.tex_screen, blit::ColourSpace::Linear, self.wgpu.surface_format);
         self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
     }
 
@@ -806,10 +619,10 @@ impl WgpuToyRenderer {
             Ok(im) => {
                 use image::GenericImageView;
                 let (width, height) = im.dimensions();
-                self.channels[index] = Blitter::new(
+                self.channels[index] = blit::Blitter::new(
                     &self.wgpu,
                     &create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8Unorm),
-                    ColourSpace::Rgbe,
+                    blit::ColourSpace::Rgbe,
                     wgpu::TextureFormat::Rgba16Float,
                 ).create_texture(&self.wgpu, width, height);
                 self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
