@@ -17,7 +17,6 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 #[wasm_bindgen]
 pub struct WgpuContext {
     window: winit::window::Window,
-    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface,
@@ -254,16 +253,16 @@ fn init_window(bind_id: String) -> Result<winit::window::Window, Box<dyn std::er
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn init_window(_: String) -> Option<winit::window::Window> {
+fn init_window(_: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
     env_logger::init();
     let event_loop = winit::event_loop::EventLoop::new();
-    winit::window::Window::new(&event_loop).ok()
+    winit::window::Window::new(&event_loop).map_err(Box::from)
 }
 
 // FIXME: async fn(&str) doesn't currently work with wasm_bindgen: https://stackoverflow.com/a/63655324/78204
 #[wasm_bindgen]
-pub async fn init_wgpu(bind_id: String) -> WgpuContext {
-    let window = init_window(bind_id).expect("failed to create window");
+pub async fn init_wgpu(bind_id: String) -> Result<WgpuContext, String> {
+    let window = init_window(bind_id).map_err(|e| e.to_string())?;
     let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
@@ -272,12 +271,10 @@ pub async fn init_wgpu(bind_id: String) -> WgpuContext {
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
         })
-        .await
-        .expect("error finding adapter");
+        .await.ok_or("unable to create adapter")?;
     let (device, queue) = adapter
         .request_device(&Default::default(), None)
-        .await
-        .expect("error creating device");
+        .await.map_err(|e| e.to_string())?;
     let size = window.inner_size();
     let surface_format = surface.get_preferred_format(&adapter).unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
     surface.configure(&device, &wgpu::SurfaceConfiguration {
@@ -287,14 +284,13 @@ pub async fn init_wgpu(bind_id: String) -> WgpuContext {
         height: size.height,
         present_mode: wgpu::PresentMode::Fifo, // vsync
     });
-    WgpuContext {
+    Ok(WgpuContext {
         window,
-        adapter,
         device,
         queue,
         surface,
         surface_format,
-    }
+    })
 }
 
 fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) -> Uniforms {
@@ -413,9 +409,11 @@ fn create_render_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout, 
 }
 
 fn stage(staging_belt: &mut wgpu::util::StagingBelt, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, data: &[u8], buffer: &wgpu::Buffer) {
-    let size = wgpu::BufferSize::new(data.len() as u64).expect("size must be non-zero");
-    staging_belt.write_buffer(encoder, buffer, 0, size, device)
-        .copy_from_slice(data);
+    match wgpu::BufferSize::new(data.len() as u64) {
+        None => log::warn!("no data to stage"),
+        Some(size) => staging_belt.write_buffer(encoder, buffer, 0, size, device)
+                                  .copy_from_slice(data)
+    }
 }
 
 // https://llogiq.github.io/2016/09/24/newline.html
@@ -519,9 +517,13 @@ impl WgpuToyRenderer {
     }
 
     pub fn render(&mut self) {
-        let frame = self.wgpu.surface
-            .get_current_texture()
-            .expect("error getting texture from swap chain");
+        match self.wgpu.surface.get_current_texture() {
+            Err(e) => log::error!("Unable to get framebuffer: {e}"),
+            Ok(f) => self.render_to(f)
+        }
+    }
+
+    fn render_to(&mut self, frame: wgpu::SurfaceTexture) {
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
         let custom_bytes: Vec<u8> = self.custom.values().flat_map(|x| bytemuck::bytes_of(x).iter().copied()).collect();
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &custom_bytes, &self.uniforms.custom);
