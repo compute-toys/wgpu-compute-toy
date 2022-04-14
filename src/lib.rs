@@ -95,14 +95,14 @@ pub struct WgpuToyRenderer {
     compute_bind_group: wgpu::BindGroup,
     staging_belt: wgpu::util::StagingBelt,
     on_error_cb: ErrorCallback,
-    channel0: wgpu::Texture,
+    channels: [wgpu::Texture; 2],
     pass_f32: bool,
     screen_blitter: Blitter,
 }
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
-fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 11] {
+fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 12] {
     [
         wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -200,6 +200,16 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
         },
         wgpu::BindGroupLayoutEntry {
             binding: 10,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture {
+                multisampled: false,
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 11,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
                 multisampled: false,
@@ -365,7 +375,7 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) 
     }
 }
 
-fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout, uniforms: &Uniforms, channel0: &wgpu::Texture) -> wgpu::BindGroup {
+fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout, uniforms: &Uniforms, channels: &[wgpu::Texture]) -> wgpu::BindGroup {
     wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout,
@@ -390,7 +400,8 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             })) },
-            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&channel0.create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&channels[0].create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&channels[1].create_view(&Default::default())) },
         ],
     })
 }
@@ -520,21 +531,23 @@ impl WgpuToyRenderer {
             entries: &compute_bind_group_layout_entries(false),
         });
 
-        let channel0 = wgpu.device.create_texture(
-            &wgpu::TextureDescriptor {
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                label: None,
-            }
-        );
+        let blank = wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            label: None,
+        };
+        let channels = [
+            wgpu.device.create_texture(&blank),
+            wgpu.device.create_texture(&blank),
+        ];
 
         let mut custom = std::collections::BTreeMap::new();
         custom.insert("_dummy".into(), 0.); // just to avoid creating an empty struct in wgsl
@@ -545,7 +558,7 @@ impl WgpuToyRenderer {
                 bind_group_layouts: &[&compute_bind_group_layout],
                 push_constant_ranges: &[],
             }),
-            compute_bind_group: create_compute_bind_group(&wgpu, &compute_bind_group_layout, &uniforms, &channel0),
+            compute_bind_group: create_compute_bind_group(&wgpu, &compute_bind_group_layout, &uniforms, &channels),
             last_compute_pipelines: None,
             compute_pipelines: vec![],
             screen_width: size.width,
@@ -565,7 +578,7 @@ impl WgpuToyRenderer {
             uniforms,
             compute_bind_group_layout,
             on_error_cb: ErrorCallback(None),
-            channel0,
+            channels,
             custom,
             pass_f32: false,
         }
@@ -666,6 +679,7 @@ impl WgpuToyRenderer {
             @group(0) @binding(8) var nearest: sampler;
             @group(0) @binding(9) var bilinear: sampler;
             @group(0) @binding(10) var channel0: texture_2d<f32>;
+            @group(0) @binding(11) var channel1: texture_2d<f32>;
         "#));
         s.push_str(r#"
             fn keyDown(keycode: uint) -> bool {
@@ -749,7 +763,7 @@ impl WgpuToyRenderer {
             bind_group_layouts: &[&self.compute_bind_group_layout],
             push_constant_ranges: &[],
         });
-        self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);
+        self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
         self.screen_blitter = Blitter::new(&self.wgpu, &self.uniforms.tex_screen, ColourSpace::Linear, self.wgpu.surface_format);
         self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
     }
@@ -776,29 +790,29 @@ impl WgpuToyRenderer {
         });
     }
 
-    pub fn load_channel(&mut self, bytes: &[u8]) {
+    pub fn load_channel(&mut self, index: usize, bytes: &[u8]) {
         match image::load_from_memory(bytes) {
             Err(e) => log::error!("load_channel: {e}"),
             Ok(im) => {
-                self.channel0 = create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8UnormSrgb);
-                self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);
+                self.channels[index] = create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8UnormSrgb);
+                self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
             }
         }
     }
 
-    pub fn load_channel_rgbe(&mut self, bytes: &[u8]) {
+    pub fn load_channel_rgbe(&mut self, index: usize, bytes: &[u8]) {
         match image::load_from_memory(bytes) {
             Err(e) => log::error!("load_channel_rgbe: {e}"),
             Ok(im) => {
                 use image::GenericImageView;
                 let (width, height) = im.dimensions();
-                self.channel0 = Blitter::new(
+                self.channels[index] = Blitter::new(
                     &self.wgpu,
                     &create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8Unorm),
                     ColourSpace::Rgbe,
                     wgpu::TextureFormat::Rgba16Float,
                 ).create_texture(&self.wgpu, width, height);
-                self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channel0);
+                self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
             }
         }
     }
