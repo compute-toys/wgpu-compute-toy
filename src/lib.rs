@@ -10,6 +10,7 @@ use num::Integer;
 use bitvec::prelude::*;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
+use naga::EntryPoint;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -92,6 +93,7 @@ pub struct WgpuToyRenderer {
     channels: [wgpu::Texture; 2],
     pass_f32: bool,
     screen_blitter: blit::Blitter,
+    entry_point_names: Vec<String>
 }
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
@@ -394,6 +396,7 @@ impl WgpuToyRenderer {
             channels,
             custom,
             pass_f32: false,
+            entry_point_names: vec![]
         }
     }
 
@@ -517,6 +520,7 @@ impl WgpuToyRenderer {
             Ok(module) => {
                 let entry_points: Vec<_> = module.entry_points.iter()
                     .filter(|f| f.stage == naga::ShaderStage::Compute).collect();
+                self.entry_point_names = entry_points.iter().map(|entry_point| {entry_point.name.clone()}).collect();
                 let compute_shader = self.wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
                     label: None,
                     source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
@@ -628,6 +632,10 @@ impl WgpuToyRenderer {
                 self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
             }
         }
+    }
+
+    pub fn get_entry_points(&self) -> js_sys::Array {
+        return self.entry_point_names.clone().into_iter().map(JsValue::from).collect::<js_sys::Array>();
     }
 }
 
