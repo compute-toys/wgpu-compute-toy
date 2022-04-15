@@ -458,21 +458,13 @@ impl WgpuToyRenderer {
 
     fn prelude(&self) -> String {
         let mut s = String::new();
+        for (a,t) in [("int","i32"), ("uint","u32"), ("float","f32")] {
+            s.push_str(&format!("type {a} = {t};"));
+            for n in [2,3,4] {
+                s.push_str(&format!("type {a}{n} = vec{n}<{t}>;"));
+            }
+        }
         s.push_str(r#"
-            type int = i32;
-            type uint = u32;
-            type float = f32;
-
-            type int2 = vec2<i32>;
-            type int3 = vec3<i32>;
-            type int4 = vec4<i32>;
-            type uint2 = vec2<u32>;
-            type uint3 = vec3<u32>;
-            type uint4 = vec4<u32>;
-            type float2 = vec2<f32>;
-            type float3 = vec3<f32>;
-            type float4 = vec4<f32>;
-
             struct Time { frame: uint, elapsed: float };
             struct Mouse { pos: uint2, click: int };
         "#);
