@@ -10,7 +10,6 @@ use num::Integer;
 use bitvec::prelude::*;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
-use naga::EntryPoint;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -66,6 +65,27 @@ impl ErrorCallback {
     }
 }
 
+#[derive(Clone)]
+struct SuccessCallback(Option<js_sys::Function>);
+
+impl SuccessCallback {
+    fn call(&self, entry_points: Vec<String>) {
+        match self.0 {
+            None => log::error!("No success callback registered"),
+            Some(ref callback) => {
+                let res = callback.call1(
+                    &JsValue::NULL,
+                    &JsValue::from(entry_points.into_iter().map(JsValue::from).collect::<js_sys::Array>())
+                );
+                match res {
+                    Err(error) => log::error!("Error calling registered error callback: {error:?}"),
+                    _ => ()
+                };
+            }
+        }
+    }
+}
+
 // safe because wasm is single-threaded: https://github.com/rustwasm/wasm-bindgen/issues/1505
 unsafe impl Send for ErrorCallback {}
 unsafe impl Sync for ErrorCallback {}
@@ -90,10 +110,10 @@ pub struct WgpuToyRenderer {
     compute_bind_group: wgpu::BindGroup,
     staging_belt: wgpu::util::StagingBelt,
     on_error_cb: ErrorCallback,
+    on_success_cb: SuccessCallback,
     channels: [wgpu::Texture; 2],
     pass_f32: bool,
-    screen_blitter: blit::Blitter,
-    entry_point_names: Vec<String>
+    screen_blitter: blit::Blitter
 }
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
@@ -393,10 +413,10 @@ impl WgpuToyRenderer {
             uniforms,
             compute_bind_group_layout,
             on_error_cb: ErrorCallback(None),
+            on_success_cb: SuccessCallback(None),
             channels,
             custom,
-            pass_f32: false,
-            entry_point_names: vec![]
+            pass_f32: false
         }
     }
 
@@ -504,6 +524,10 @@ impl WgpuToyRenderer {
         self.on_error_cb.call(&summary, if row >= prelude_len { row - prelude_len } else { 0 }, col);
     }
 
+    fn handle_success(&self, entry_points: Vec<String>) {
+        self.on_success_cb.call(entry_points);
+    }
+
     pub fn set_shader(&mut self, shader: &str) {
         let mut wgsl: String = self.prelude();
         let shader: String = shader.into();
@@ -512,7 +536,8 @@ impl WgpuToyRenderer {
             Ok(module) => {
                 let entry_points: Vec<_> = module.entry_points.iter()
                     .filter(|f| f.stage == naga::ShaderStage::Compute).collect();
-                self.entry_point_names = entry_points.iter().map(|entry_point| {entry_point.name.clone()}).collect();
+                let entry_point_names: Vec<String> = entry_points.iter().map(|entry_point| {entry_point.name.clone()}).collect();
+                self.handle_success(entry_point_names);
                 let compute_shader = self.wgpu.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
                     label: None,
                     source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
@@ -599,6 +624,10 @@ impl WgpuToyRenderer {
         });
     }
 
+    pub fn on_success(&mut self, callback: js_sys::Function) {
+        self.on_success_cb = SuccessCallback(Some(callback));
+    }
+
     pub fn load_channel(&mut self, index: usize, bytes: &[u8]) {
         match image::load_from_memory(bytes) {
             Err(e) => log::error!("load_channel: {e}"),
@@ -626,9 +655,6 @@ impl WgpuToyRenderer {
         }
     }
 
-    pub fn get_entry_points(&self) -> js_sys::Array {
-        return self.entry_point_names.clone().into_iter().map(JsValue::from).collect::<js_sys::Array>();
-    }
 }
 
 fn create_texture_from_image(wgpu: &WgpuContext, im: &image::DynamicImage, format: wgpu::TextureFormat) -> wgpu::Texture {
