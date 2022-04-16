@@ -101,7 +101,8 @@ pub struct WgpuToyRenderer {
     time: Time,
     mouse: Mouse,
     keys: BitArr!(for NUM_KEYCODES, in u8, Lsb0),
-    custom: std::collections::BTreeMap<String, f32>,
+    custom_names: Vec<String>,
+    custom_values: Vec<f32>,
     uniforms: Uniforms,
     compute_bind_group_layout: wgpu::BindGroupLayout,
     compute_pipeline_layout: wgpu::PipelineLayout,
@@ -384,9 +385,6 @@ impl WgpuToyRenderer {
             wgpu.device.create_texture(&blank),
         ];
 
-        let mut custom = std::collections::BTreeMap::new();
-        custom.insert("_dummy".into(), 0.); // just to avoid creating an empty struct in wgsl
-
         WgpuToyRenderer {
             compute_pipeline_layout: wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
@@ -415,7 +413,8 @@ impl WgpuToyRenderer {
             on_error_cb: ErrorCallback(None),
             on_success_cb: SuccessCallback(None),
             channels,
-            custom,
+            custom_names: vec!["_dummy".into()], // just to avoid creating an empty struct in wgsl
+            custom_values: vec![0.],
             pass_f32: false
         }
     }
@@ -429,7 +428,7 @@ impl WgpuToyRenderer {
 
     fn render_to(&mut self, frame: wgpu::SurfaceTexture) {
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
-        let custom_bytes: Vec<u8> = self.custom.values().flat_map(|x| bytemuck::bytes_of(x).iter().copied()).collect();
+        let custom_bytes: Vec<u8> = self.custom_values.iter().flat_map(|x| bytemuck::bytes_of(x).iter().copied()).collect();
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &custom_bytes, &self.uniforms.custom);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.time), &self.uniforms.time);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
@@ -489,8 +488,8 @@ impl WgpuToyRenderer {
             struct Mouse { pos: uint2, click: int };
         "#);
         s.push_str("struct Custom {");
-        for name in self.custom.keys() {
-            s.push_str(&name);
+        for name in &self.custom_names {
+            s.push_str(name);
             s.push_str(": float,");
         }
         s.push_str("};");
@@ -575,8 +574,9 @@ impl WgpuToyRenderer {
         self.keys.set(keycode, keydown);
     }
 
-    pub fn set_custom_float(&mut self, name: &str, value: f32) {
-        self.custom.insert(name.into(), value);
+    pub fn set_custom_floats(&mut self, names: Vec<js_sys::JsString>, values: Vec<f32>) {
+        self.custom_names = names.iter().map(From::from).collect();
+        self.custom_values = values;
     }
 
     pub fn set_pass_f32(&mut self, pass_f32: bool) {
