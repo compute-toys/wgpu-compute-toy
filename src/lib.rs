@@ -406,7 +406,12 @@ impl WgpuToyRenderer {
             },
             keys: bitarr![u8, Lsb0; 0; 256],
             staging_belt: wgpu::util::StagingBelt::new(4096),
-            screen_blitter: blit::Blitter::new(&wgpu, &uniforms.tex_screen, blit::ColourSpace::Linear, wgpu.surface_format),
+            screen_blitter: blit::Blitter::new(
+                &wgpu,
+                &uniforms.tex_screen.create_view(&Default::default()),
+                blit::ColourSpace::Linear,
+                wgpu.surface_format,
+                wgpu::FilterMode::Nearest),
             wgpu,
             uniforms,
             compute_bind_group_layout,
@@ -469,7 +474,7 @@ impl WgpuToyRenderer {
                 });
         }
         self.time.frame += 1;
-        self.screen_blitter.blit(&mut encoder, &frame.texture);
+        self.screen_blitter.blit(&mut encoder, &frame.texture.create_view(&Default::default()));
         self.wgpu.queue.submit(Some(encoder.finish()));
         wasm_bindgen_futures::spawn_local(self.staging_belt.recall());
         frame.present();
@@ -598,7 +603,12 @@ impl WgpuToyRenderer {
             push_constant_ranges: &[],
         });
         self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
-        self.screen_blitter = blit::Blitter::new(&self.wgpu, &self.uniforms.tex_screen, blit::ColourSpace::Linear, self.wgpu.surface_format);
+        self.screen_blitter = blit::Blitter::new(
+            &self.wgpu,
+            &self.uniforms.tex_screen.create_view(&Default::default()),
+            blit::ColourSpace::Linear,
+            self.wgpu.surface_format,
+            wgpu::FilterMode::Nearest);
         self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
     }
 
@@ -646,10 +656,11 @@ impl WgpuToyRenderer {
                 let (width, height) = im.dimensions();
                 self.channels[index] = blit::Blitter::new(
                     &self.wgpu,
-                    &create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8Unorm),
+                    &create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8Unorm).create_view(&Default::default()),
                     blit::ColourSpace::Rgbe,
                     wgpu::TextureFormat::Rgba16Float,
-                ).create_texture(&self.wgpu, width, height);
+                    wgpu::FilterMode::Linear,
+                ).create_texture(&self.wgpu, width, height, 1 + (std::cmp::max(width, height) as f32).log2() as u32);
                 self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
             }
         }
