@@ -1,5 +1,6 @@
 use crate::context::WgpuContext;
 
+#[derive(Copy, Clone, Debug)]
 pub enum ColourSpace {
     Linear,
     Rgbe,
@@ -17,7 +18,7 @@ impl Blitter {
             label: None,
             source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
         });
-        let filterable = (filter == wgpu::FilterMode::Linear);
+        let filterable = filter == wgpu::FilterMode::Linear;
         let render_bind_group_layout = wgpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[
@@ -69,10 +70,12 @@ impl Blitter {
                     entry_point: match (src_space, dest_format) {
                         // FIXME use sRGB viewFormats instead once the API stabilises
                         (ColourSpace::Linear, wgpu::TextureFormat::Bgra8Unorm) => "fs_main_linear_to_srgb",
+                        (ColourSpace::Linear, wgpu::TextureFormat::Rgba8Unorm) => "fs_main_linear_to_srgb",
                         (ColourSpace::Linear, wgpu::TextureFormat::Bgra8UnormSrgb) => "fs_main", // format automatically performs sRGB encoding
+                        (ColourSpace::Linear, wgpu::TextureFormat::Rgba8UnormSrgb) => "fs_main",
                         (ColourSpace::Linear, wgpu::TextureFormat::Rgba16Float) => "fs_main",
                         (ColourSpace::Rgbe, wgpu::TextureFormat::Rgba16Float) => "fs_main_rgbe_to_linear",
-                        _ => panic!("Blitter: unrecognised conversion")
+                        _ => panic!("Blitter: unrecognised conversion from {src_space:?} to {dest_format:?}")
                     },
                     targets: &[dest_format.into()],
                 }),

@@ -119,7 +119,7 @@ pub struct WgpuToyRenderer {
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
-fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 12] {
+fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 13] {
     [
         wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -204,18 +204,6 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
-            binding: 8,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-            count: None,
-        },
-        wgpu::BindGroupLayoutEntry {
-            binding: 9,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-            count: None,
-        },
-        wgpu::BindGroupLayoutEntry {
             binding: 10,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
@@ -233,6 +221,24 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
                 view_dimension: wgpu::TextureViewDimension::D2,
             },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 20,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 21,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 22,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         },
     ]
@@ -331,14 +337,20 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             })) },
-            wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
-            wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
+            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&channels[0].create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&channels[1].create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 20, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 21, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             })) },
-            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&channels[0].create_view(&Default::default())) },
-            wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&channels[1].create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 22, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            })) },
         ],
     })
 }
@@ -508,10 +520,11 @@ impl WgpuToyRenderer {
             @group(0) @binding(5) var<storage,read_write> atomic_storage: array<atomic<i32>>;
             @group(0) @binding(6) var pass_in: texture_2d_array<f32>;
             @group(0) @binding(7) var pass_out: texture_storage_2d_array<{pass_format},write>;
-            @group(0) @binding(8) var nearest: sampler;
-            @group(0) @binding(9) var bilinear: sampler;
             @group(0) @binding(10) var channel0: texture_2d<f32>;
             @group(0) @binding(11) var channel1: texture_2d<f32>;
+            @group(0) @binding(20) var nearest: sampler;
+            @group(0) @binding(21) var bilinear: sampler;
+            @group(0) @binding(22) var trilinear: sampler;
         "#));
         s.push_str(r#"
             fn keyDown(keycode: uint) -> bool {
@@ -642,7 +655,15 @@ impl WgpuToyRenderer {
         match image::load_from_memory(bytes) {
             Err(e) => log::error!("load_channel: {e}"),
             Ok(im) => {
-                self.channels[index] = create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8UnormSrgb);
+                use image::GenericImageView;
+                let (width, height) = im.dimensions();
+                self.channels[index] = blit::Blitter::new(
+                    &self.wgpu,
+                    &create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8UnormSrgb).create_view(&Default::default()),
+                    blit::ColourSpace::Linear,
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                    wgpu::FilterMode::Linear,
+                ).create_texture(&self.wgpu, width, height, 1 + (std::cmp::max(width, height) as f32).log2() as u32);
                 self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
             }
         }
