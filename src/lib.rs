@@ -659,7 +659,7 @@ impl WgpuToyRenderer {
                 let (width, height) = im.dimensions();
                 self.channels[index] = blit::Blitter::new(
                     &self.wgpu,
-                    &create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8UnormSrgb).create_view(&Default::default()),
+                    &create_texture_from_image(&self.wgpu, &im.to_rgba8(), width, height, wgpu::TextureFormat::Rgba8UnormSrgb).create_view(&Default::default()),
                     blit::ColourSpace::Linear,
                     wgpu::TextureFormat::Rgba8UnormSrgb,
                     wgpu::FilterMode::Linear,
@@ -669,29 +669,25 @@ impl WgpuToyRenderer {
         }
     }
 
-    pub fn load_channel_rgbe(&mut self, index: usize, bytes: &[u8]) {
-        match image::load_from_memory(bytes) {
-            Err(e) => log::error!("load_channel_rgbe: {e}"),
-            Ok(im) => {
-                use image::GenericImageView;
-                let (width, height) = im.dimensions();
-                self.channels[index] = blit::Blitter::new(
-                    &self.wgpu,
-                    &create_texture_from_image(&self.wgpu, &im, wgpu::TextureFormat::Rgba8Unorm).create_view(&Default::default()),
-                    blit::ColourSpace::Rgbe,
-                    wgpu::TextureFormat::Rgba16Float,
-                    wgpu::FilterMode::Linear,
-                ).create_texture(&self.wgpu, width, height, 1 + (std::cmp::max(width, height) as f32).log2() as u32);
-                self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
-            }
-        }
+    pub fn load_channel_hdr(&mut self, index: usize, bytes: &[u8]) -> Result<(), String> {
+        let decoder = image::codecs::hdr::HdrDecoder::new(bytes).map_err(|e| e.to_string())?;
+        let meta = decoder.metadata();
+        let pixels = decoder.read_image_native().map_err(|e| e.to_string())?;
+        let bytes: Vec<u8> = pixels.iter().flat_map(|p| [p.c[0], p.c[1], p.c[2], p.e]).collect();
+        self.channels[index] = blit::Blitter::new(
+            &self.wgpu,
+            &create_texture_from_image(&self.wgpu, &bytes, meta.width, meta.height, wgpu::TextureFormat::Rgba8Unorm).create_view(&Default::default()),
+            blit::ColourSpace::Rgbe,
+            wgpu::TextureFormat::Rgba16Float,
+            wgpu::FilterMode::Linear,
+        ).create_texture(&self.wgpu, meta.width, meta.height, 1 + (std::cmp::max(meta.width, meta.height) as f32).log2() as u32);
+        self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
+        Ok(())
     }
 
 }
 
-fn create_texture_from_image(wgpu: &WgpuContext, im: &image::DynamicImage, format: wgpu::TextureFormat) -> wgpu::Texture {
-    use image::GenericImageView;
-    let (width, height) = im.dimensions();
+fn create_texture_from_image(wgpu: &WgpuContext, rgba: &[u8], width: u32, height: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
     let texture = wgpu.device.create_texture(
         &wgpu::TextureDescriptor {
             size: wgpu::Extent3d {
@@ -709,7 +705,7 @@ fn create_texture_from_image(wgpu: &WgpuContext, im: &image::DynamicImage, forma
     );
     wgpu.queue.write_texture(
         texture.as_image_copy(),
-        &im.to_rgba8(),
+        rgba,
         wgpu::ImageDataLayout {
             offset: 0,
             bytes_per_row: std::num::NonZeroU32::new(4 * width),
