@@ -37,6 +37,7 @@ struct Uniforms {
     keys: wgpu::Buffer,
     custom: wgpu::Buffer,
     storage_buffer: wgpu::Buffer,
+    debug_buffer: wgpu::Buffer,
     tex_read: wgpu::Texture,
     tex_write: wgpu::Texture,
     tex_screen: wgpu::Texture,
@@ -92,6 +93,7 @@ unsafe impl Sync for ErrorCallback {}
 
 const NUM_KEYCODES: usize = 256;
 const MAX_CUSTOM_PARAMS: usize = 16;
+const NUM_ASSERT_COUNTERS: usize = 10;
 
 #[wasm_bindgen]
 pub struct WgpuToyRenderer {
@@ -119,7 +121,7 @@ pub struct WgpuToyRenderer {
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
-fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 13] {
+fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 14] {
     [
         wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -204,6 +206,18 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
+            binding: 8,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage {
+                    read_only: false
+                },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
             binding: 10,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
@@ -272,8 +286,14 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) 
         }),
         storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: (4 * 4 * width * height).into(),
+            size: size_of::<i32>() as u64 * 4 * width as u64 * height as u64,
             usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        }),
+        debug_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (NUM_ASSERT_COUNTERS * size_of::<u32>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }),
         tex_read: wgpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -337,6 +357,7 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             })) },
+            wgpu::BindGroupEntry { binding: 8, resource: uniforms.debug_buffer.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&channels[0].create_view(&Default::default())) },
             wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&channels[1].create_view(&Default::default())) },
             wgpu::BindGroupEntry { binding: 20, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
@@ -450,6 +471,8 @@ impl WgpuToyRenderer {
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.time), &self.uniforms.time);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.keys.as_raw_slice(), &self.uniforms.keys);
+        //encoder.clear_buffer(&self.uniforms.debug_buffer, 0, None); // doesn't work for some reason
+        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&[0u32; NUM_ASSERT_COUNTERS]), &self.uniforms.debug_buffer);
         self.staging_belt.finish();
         if SHADER_ERROR.swap(false, Ordering::SeqCst) {
             match take(&mut self.last_compute_pipelines) {
@@ -485,9 +508,42 @@ impl WgpuToyRenderer {
                     depth_or_array_layers: 4,
                 });
         }
+        let mut staging_buffer = None;
+        if self.time.frame % 100 == 0 {
+            let buf = self.wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: (NUM_ASSERT_COUNTERS * size_of::<u32>()) as u64,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            encoder.copy_buffer_to_buffer(&self.uniforms.debug_buffer, 0, &buf, 0, (NUM_ASSERT_COUNTERS * size_of::<u32>()) as u64);
+            staging_buffer = Some(buf);
+        }
         self.time.frame += 1;
         self.screen_blitter.blit(&mut encoder, &frame.texture.create_view(&Default::default()));
         self.wgpu.queue.submit(Some(encoder.finish()));
+        if let Some(buf) = staging_buffer {
+            self.wgpu.device.poll(wgpu::Maintain::Wait);
+            let numthreads = self.screen_width * self.screen_height;
+            wasm_bindgen_futures::spawn_local(async move {
+                let buffer_slice = buf.slice(..);
+                let buffer_future = buffer_slice.map_async(wgpu::MapMode::Read);
+                match buffer_future.await {
+                    Err(e) => log::error!("{e}"),
+                    Ok(()) => {
+                        let data = buffer_slice.get_mapped_range();
+                        let result: &[u32] = bytemuck::cast_slice(&data);
+                        for (i, count) in result.iter().enumerate() {
+                            if count > &0 {
+                                let percent = *count as f32 / numthreads as f32 * 100.0;
+                                log::warn!("Assertion {i} failed in {percent}% of threads");
+                            }
+                        }
+                    }
+                }
+                buf.unmap();
+            });
+        }
         wasm_bindgen_futures::spawn_local(self.staging_belt.recall());
         frame.present();
     }
@@ -520,6 +576,7 @@ impl WgpuToyRenderer {
             @group(0) @binding(5) var<storage,read_write> atomic_storage: array<atomic<i32>>;
             @group(0) @binding(6) var pass_in: texture_2d_array<f32>;
             @group(0) @binding(7) var pass_out: texture_storage_2d_array<{pass_format},write>;
+            @group(0) @binding(8) var<storage,read_write> _assert_counts: array<atomic<u32>>;
             @group(0) @binding(10) var channel0: texture_2d<f32>;
             @group(0) @binding(11) var channel1: texture_2d<f32>;
             @group(0) @binding(20) var nearest: sampler;
@@ -529,6 +586,11 @@ impl WgpuToyRenderer {
         s.push_str(r#"
             fn keyDown(keycode: uint) -> bool {
                 return ((_keyboard[keycode / 128u][(keycode % 128u) / 32u] >> (keycode % 32u)) & 1u) == 1u;
+            }
+            fn assert(index: int, success: bool) {
+                if (!success) {
+                    atomicAdd(&_assert_counts[index], 1u);
+                }
             }
         "#);
         return s;
