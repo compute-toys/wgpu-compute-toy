@@ -680,6 +680,7 @@ impl WgpuToyRenderer {
 
     pub fn set_pass_f32(&mut self, pass_f32: bool) {
         self.pass_f32 = pass_f32;
+        self.reset();
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -704,6 +705,10 @@ impl WgpuToyRenderer {
             self.wgpu.surface_format,
             wgpu::FilterMode::Nearest);
         self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
+    }
+
+    pub fn reset(&mut self) {
+        self.resize(self.screen_width, self.screen_height);
     }
 
     pub fn on_error(&mut self, callback: js_sys::Function) {
