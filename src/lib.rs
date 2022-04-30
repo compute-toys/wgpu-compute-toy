@@ -720,8 +720,15 @@ impl WgpuToyRenderer {
         let on_error_cb = self.on_error_cb.clone();
         self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
             let err = &e.to_string();
+            if err.starts_with("[Invalid ComputePipeline] is invalid.")
+            || err.starts_with("[Invalid CommandBuffer] is invalid.") {
+                return;
+            }
             match re.captures(err) {
-                None =>  log::error!("{e}"),
+                None => {
+                    log::error!("{e}");
+                    on_error_cb.call(err, 0, 0);
+                },
                 Some(cap) => {
                     let row = cap[1].parse().unwrap_or(prelude_len);
                     let col = cap[2].parse().unwrap_or(0);
