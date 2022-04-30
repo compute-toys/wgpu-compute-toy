@@ -116,7 +116,8 @@ pub struct WgpuToyRenderer {
     on_success_cb: SuccessCallback,
     channels: [wgpu::Texture; 2],
     pass_f32: bool,
-    screen_blitter: blit::Blitter
+    screen_blitter: blit::Blitter,
+    query_set: Option<wgpu::QuerySet>,
 }
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
@@ -453,7 +454,8 @@ impl WgpuToyRenderer {
             channels,
             custom_names: vec!["_dummy".into()], // just to avoid creating an empty struct in wgsl
             custom_values: vec![0.],
-            pass_f32: false
+            pass_f32: false,
+            query_set: None,
         }
     }
 
@@ -482,13 +484,18 @@ impl WgpuToyRenderer {
                 }
             }
         }
-        for (pipeline, workgroup_size) in &self.compute_pipelines {
-            {
-                let mut compute_pass = encoder.begin_compute_pass(&Default::default());
-                compute_pass.set_pipeline(pipeline);
-                compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-                compute_pass.dispatch(self.screen_width.div_ceil(&workgroup_size[0]), self.screen_height.div_ceil(&workgroup_size[1]), 1);
+        for (pass_index, (pipeline, workgroup_size)) in self.compute_pipelines.iter().enumerate() {
+            let mut compute_pass = encoder.begin_compute_pass(&Default::default());
+            if let Some(q) = &self.query_set {
+                compute_pass.write_timestamp(q, 2 * pass_index as u32);
             }
+            compute_pass.set_pipeline(pipeline);
+            compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
+            compute_pass.dispatch(self.screen_width.div_ceil(&workgroup_size[0]), self.screen_height.div_ceil(&workgroup_size[1]), 1);
+            if let Some(q) = &self.query_set {
+                compute_pass.write_timestamp(q, 2 * pass_index as u32 + 1);
+            }
+            drop(compute_pass);
             encoder.copy_texture_to_texture(
                 wgpu::ImageCopyTexture {
                     texture: &self.uniforms.tex_write,
@@ -509,14 +516,19 @@ impl WgpuToyRenderer {
                 });
         }
         let mut staging_buffer = None;
+        let query_offset = NUM_ASSERT_COUNTERS * size_of::<u32>();
+        let query_count = 2 * self.compute_pipelines.len();
         if self.time.frame % 100 == 0 {
             let buf = self.wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
-                size: (NUM_ASSERT_COUNTERS * size_of::<u32>()) as u64,
+                size: (query_offset + query_count * size_of::<u64>()) as wgpu::BufferAddress,
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            encoder.copy_buffer_to_buffer(&self.uniforms.debug_buffer, 0, &buf, 0, (NUM_ASSERT_COUNTERS * size_of::<u32>()) as u64);
+            encoder.copy_buffer_to_buffer(&self.uniforms.debug_buffer, 0, &buf, 0, query_offset as wgpu::BufferAddress);
+            if let Some(q) = &self.query_set {
+                encoder.resolve_query_set(q, 0..query_count as u32, &buf, query_offset as wgpu::BufferAddress);
+            }
             staging_buffer = Some(buf);
         }
         self.time.frame += 1;
@@ -527,13 +539,13 @@ impl WgpuToyRenderer {
             let numthreads = self.screen_width * self.screen_height;
             wasm_bindgen_futures::spawn_local(async move {
                 let buffer_slice = buf.slice(..);
-                let buffer_future = buffer_slice.map_async(wgpu::MapMode::Read);
-                match buffer_future.await {
+                match buffer_slice.map_async(wgpu::MapMode::Read).await {
                     Err(e) => log::error!("{e}"),
                     Ok(()) => {
                         let data = buffer_slice.get_mapped_range();
-                        let result: &[u32] = bytemuck::cast_slice(&data);
-                        for (i, count) in result.iter().enumerate() {
+                        let assertions: &[u32] = bytemuck::cast_slice(&data[0..query_offset]);
+                        let timestamps: &[u64] = bytemuck::cast_slice(&data[query_offset..]);
+                        for (i, count) in assertions.iter().enumerate() {
                             if count > &0 {
                                 let percent = *count as f32 / numthreads as f32 * 100.0;
                                 log::warn!("Assertion {i} failed in {percent}% of threads");
@@ -630,6 +642,13 @@ impl WgpuToyRenderer {
                         entry_point: &entry_point.name,
                     }), entry_point.workgroup_size)
                 }).collect();
+                self.query_set = if !self.wgpu.device.features().contains(wgpu::Features::TIMESTAMP_QUERY) { None } else {
+                    Some(self.wgpu.device.create_query_set(&wgpu::QuerySetDescriptor {
+                        label: None,
+                        count: 2 * self.compute_pipelines.len() as u32,
+                        ty: wgpu::QueryType::Timestamp,
+                    }))
+                }
             },
             Err(e) => {
                 log::error!("Error parsing WGSL: {e}");
