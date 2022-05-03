@@ -716,15 +716,15 @@ impl WgpuToyRenderer {
 
         // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
         let prelude_len = count_newlines(&self.prelude());
-        let re = lazy_regex::regex!(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader");
+        let re_parser = lazy_regex::regex!(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader");
+        let re_invalid = lazy_regex::regex!(r"\[Invalid \w+\] is invalid.");
         let on_error_cb = self.on_error_cb.clone();
         self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
             let err = &e.to_string();
-            if err.starts_with("[Invalid ComputePipeline] is invalid.")
-            || err.starts_with("[Invalid CommandBuffer] is invalid.") {
+            if re_invalid.is_match(err) {
                 return;
             }
-            match re.captures(err) {
+            match re_parser.captures(err) {
                 None => {
                     log::error!("{e}");
                     on_error_cb.call(err, 0, 0);
