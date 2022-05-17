@@ -608,6 +608,34 @@ impl WgpuToyRenderer {
                 }
             }
         "#);
+        s.push_str(r#"
+            fn passStore(pass: int, coord: int2, value: float4) {
+                textureStore(pass_out, coord, pass, value);
+            }
+            fn passLoad(pass: int, coord: int2, lod: int) -> float4 {
+                return textureLoad(pass_in, coord, pass, lod);
+            }
+            fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {
+        "#);
+        if self.pass_f32 {
+            // https://iquilezles.org/articles/hwinterpolation/
+            s.push_str(r#"
+                let res = float2(textureDimensions(pass_in));
+                let st = uv * res - 0.5;
+                let iuv = floor(st);
+                let fuv = fract(st);
+                let a = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,0.5)) / res), pass, lod);
+                let b = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,0.5)) / res), pass, lod);
+                let c = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,1.5)) / res), pass, lod);
+                let d = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,1.5)) / res), pass, lod);
+                return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
+            "#);
+        } else {
+            s.push_str(r#"
+                return textureSampleLevel(pass_in, bilinear, fract(uv), pass, lod);
+            "#);
+        }
+        s.push_str("}");
         return s;
     }
 
