@@ -25,6 +25,7 @@ fn init_window(bind_id: String) -> Result<winit::window::Window, Box<dyn std::er
     let element = doc.get_element_by_id(&bind_id).ok_or(format!("cannot find element {bind_id}"))?;
     use wasm_bindgen::JsCast;
     let canvas = element.dyn_into::<web_sys::HtmlCanvasElement>().or(Err("cannot cast to canvas"))?;
+    canvas.get_context("webgpu").or(Err("no webgpu"))?.ok_or("no webgpu")?;
     use winit::platform::web::WindowBuilderExtWebSys;
     let window = winit::window::WindowBuilder::new()
         .with_canvas(Some(canvas))
