@@ -122,7 +122,7 @@ pub struct WgpuToyRenderer {
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
-fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 14] {
+fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 17] {
     [
         wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -256,6 +256,24 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         },
+        wgpu::BindGroupLayoutEntry {
+            binding: 23,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 24,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 25,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
     ]
 }
 
@@ -340,6 +358,12 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) 
 }
 
 fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout, uniforms: &Uniforms, channels: &[wgpu::Texture]) -> wgpu::BindGroup {
+    let repeat = wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        ..Default::default()
+    };
     wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout,
@@ -372,6 +396,18 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
                 min_filter: wgpu::FilterMode::Linear,
                 mipmap_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
+            })) },
+            wgpu::BindGroupEntry { binding: 23, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&repeat)) },
+            wgpu::BindGroupEntry { binding: 24, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..repeat
+            })) },
+            wgpu::BindGroupEntry { binding: 25, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..repeat
             })) },
         ],
     })
@@ -597,6 +633,9 @@ impl WgpuToyRenderer {
             @group(0) @binding(20) var nearest: sampler;
             @group(0) @binding(21) var bilinear: sampler;
             @group(0) @binding(22) var trilinear: sampler;
+            @group(0) @binding(23) var nearest_repeat: sampler;
+            @group(0) @binding(24) var bilinear_repeat: sampler;
+            @group(0) @binding(25) var trilinear_repeat: sampler;
         "#));
         s.push_str(r#"
             fn keyDown(keycode: uint) -> bool {
