@@ -775,6 +775,13 @@ impl WgpuToyRenderer {
             self.wgpu.surface_format,
             wgpu::FilterMode::Nearest);
         self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
+        self.wgpu.surface.configure(&self.wgpu.device, &wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: self.wgpu.surface_format,
+            width: width,
+            height: height,
+            present_mode: wgpu::PresentMode::Fifo, // vsync
+        });
     }
 
     pub fn reset(&mut self) {
