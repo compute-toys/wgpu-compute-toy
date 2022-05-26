@@ -599,80 +599,83 @@ impl WgpuToyRenderer {
         frame.present();
     }
 
-    fn prelude(&self) -> String {
+    pub fn prelude(&self) -> String {
         let mut s = String::new();
         for (a,t) in [("int","i32"), ("uint","u32"), ("float","f32")] {
-            s.push_str(&format!("type {a} = {t};"));
+            s.push_str(&format!("type {a} = {t};\n"));
             for n in [2,3,4] {
-                s.push_str(&format!("type {a}{n} = vec{n}<{t}>;"));
+                s.push_str(&format!("type {a}{n} = vec{n}<{t}>;\n"));
             }
         }
         s.push_str(r#"
-            struct Time { frame: uint, elapsed: float };
-            struct Mouse { pos: uint2, click: int };
-        "#);
-        s.push_str("struct Custom {");
+struct Time { frame: uint, elapsed: float };
+struct Mouse { pos: uint2, click: int };
+"#);
+        s.push_str("struct Custom {\n");
         for name in &self.custom_names {
+            s.push_str("    ");
             s.push_str(name);
-            s.push_str(": float,");
+            s.push_str(": float,\n");
         }
-        s.push_str("};");
+        s.push_str("};\n");
         s.push_str("@group(0) @binding(0) var<uniform> custom: Custom;");
         let pass_format = if self.pass_f32 { "rgba32float" } else { "rgba16float" };
         s.push_str(&format!(r#"
-            @group(0) @binding(1) var<uniform> time: Time;
-            @group(0) @binding(2) var<uniform> mouse: Mouse;
-            @group(0) @binding(3) var<uniform> _keyboard: array<vec4<u32>,2>;
-            @group(0) @binding(4) var screen: texture_storage_2d<rgba16float,write>;
-            @group(0) @binding(5) var<storage,read_write> atomic_storage: array<atomic<i32>>;
-            @group(0) @binding(6) var pass_in: texture_2d_array<f32>;
-            @group(0) @binding(7) var pass_out: texture_storage_2d_array<{pass_format},write>;
-            @group(0) @binding(8) var<storage,read_write> _assert_counts: array<atomic<u32>>;
-            @group(0) @binding(10) var channel0: texture_2d<f32>;
-            @group(0) @binding(11) var channel1: texture_2d<f32>;
-            @group(0) @binding(20) var nearest: sampler;
-            @group(0) @binding(21) var bilinear: sampler;
-            @group(0) @binding(22) var trilinear: sampler;
-            @group(0) @binding(23) var nearest_repeat: sampler;
-            @group(0) @binding(24) var bilinear_repeat: sampler;
-            @group(0) @binding(25) var trilinear_repeat: sampler;
+@group(0) @binding(1) var<uniform> time: Time;
+@group(0) @binding(2) var<uniform> mouse: Mouse;
+@group(0) @binding(3) var<uniform> _keyboard: array<vec4<u32>,2>;
+@group(0) @binding(4) var screen: texture_storage_2d<rgba16float,write>;
+@group(0) @binding(5) var<storage,read_write> atomic_storage: array<atomic<i32>>;
+@group(0) @binding(6) var pass_in: texture_2d_array<f32>;
+@group(0) @binding(7) var pass_out: texture_storage_2d_array<{pass_format},write>;
+@group(0) @binding(8) var<storage,read_write> _assert_counts: array<atomic<u32>>;
+@group(0) @binding(10) var channel0: texture_2d<f32>;
+@group(0) @binding(11) var channel1: texture_2d<f32>;
+@group(0) @binding(20) var nearest: sampler;
+@group(0) @binding(21) var bilinear: sampler;
+@group(0) @binding(22) var trilinear: sampler;
+@group(0) @binding(23) var nearest_repeat: sampler;
+@group(0) @binding(24) var bilinear_repeat: sampler;
+@group(0) @binding(25) var trilinear_repeat: sampler;
         "#));
         s.push_str(r#"
-            fn keyDown(keycode: uint) -> bool {
-                return ((_keyboard[keycode / 128u][(keycode % 128u) / 32u] >> (keycode % 32u)) & 1u) == 1u;
-            }
-            fn assert(index: int, success: bool) {
-                if (!success) {
-                    atomicAdd(&_assert_counts[index], 1u);
-                }
-            }
+fn keyDown(keycode: uint) -> bool {
+    return ((_keyboard[keycode / 128u][(keycode % 128u) / 32u] >> (keycode % 32u)) & 1u) == 1u;
+}
+
+fn assert(index: int, success: bool) {
+    if (!success) {
+        atomicAdd(&_assert_counts[index], 1u);
+    }
+}
         "#);
         s.push_str(r#"
-            fn passStore(pass: int, coord: int2, value: float4) {
-                textureStore(pass_out, coord, pass, value);
-            }
-            fn passLoad(pass: int, coord: int2, lod: int) -> float4 {
-                return textureLoad(pass_in, coord, pass, lod);
-            }
-            fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {
-        "#);
+fn passStore(pass: int, coord: int2, value: float4) {
+    textureStore(pass_out, coord, pass, value);
+}
+
+fn passLoad(pass: int, coord: int2, lod: int) -> float4 {
+    return textureLoad(pass_in, coord, pass, lod);
+}
+
+fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"#);
         if self.pass_f32 {
             // https://iquilezles.org/articles/hwinterpolation/
             s.push_str(r#"
-                let res = float2(textureDimensions(pass_in));
-                let st = uv * res - 0.5;
-                let iuv = floor(st);
-                let fuv = fract(st);
-                let a = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,0.5)) / res), pass, lod);
-                let b = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,0.5)) / res), pass, lod);
-                let c = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,1.5)) / res), pass, lod);
-                let d = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,1.5)) / res), pass, lod);
-                return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
-            "#);
+    let res = float2(textureDimensions(pass_in));
+    let st = uv * res - 0.5;
+    let iuv = floor(st);
+    let fuv = fract(st);
+    let a = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,0.5)) / res), pass, lod);
+    let b = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,0.5)) / res), pass, lod);
+    let c = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,1.5)) / res), pass, lod);
+    let d = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,1.5)) / res), pass, lod);
+    return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
+"#);
         } else {
             s.push_str(r#"
-                return textureSampleLevel(pass_in, bilinear, fract(uv), pass, lod);
-            "#);
+    return textureSampleLevel(pass_in, bilinear, fract(uv), pass, lod);
+"#);
         }
         s.push_str("}");
         return s;
