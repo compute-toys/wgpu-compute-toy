@@ -753,11 +753,16 @@ impl WgpuToyRenderer {
         self.reset();
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.screen_width = width;
-        self.screen_height = height;
+    pub fn resize(&mut self, width: u32, height: u32, scale: f32) {
+        self.screen_width = (width as f32 / scale) as u32;
+        self.screen_height = (height as f32 / scale) as u32;
+        self.reset();
+        self.wgpu.window.set_inner_size(winit::dpi::PhysicalSize::new(width, height));
+    }
+
+    pub fn reset(&mut self) {
         self.time.frame = 0;
-        self.uniforms = create_uniforms(&self.wgpu, width, height, self.pass_f32);
+        self.uniforms = create_uniforms(&self.wgpu, self.screen_width, self.screen_height, self.pass_f32);
         self.compute_bind_group_layout = self.wgpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &compute_bind_group_layout_entries(self.pass_f32),
@@ -774,18 +779,6 @@ impl WgpuToyRenderer {
             blit::ColourSpace::Linear,
             self.wgpu.surface_format,
             wgpu::FilterMode::Nearest);
-        self.wgpu.window.set_inner_size(winit::dpi::LogicalSize::new(width, height));
-        self.wgpu.surface.configure(&self.wgpu.device, &wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: self.wgpu.surface_format,
-            width: width,
-            height: height,
-            present_mode: wgpu::PresentMode::Fifo, // vsync
-        });
-    }
-
-    pub fn reset(&mut self) {
-        self.resize(self.screen_width, self.screen_height);
     }
 
     pub fn on_error(&mut self, callback: js_sys::Function) {
