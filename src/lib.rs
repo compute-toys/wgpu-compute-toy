@@ -703,6 +703,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
     }
 
     pub fn set_shader(&mut self, shader: &str) {
+        let now = instant::Instant::now();
         let mut wgsl: String = self.prelude();
         let shader: String = shader.into();
         wgsl.push_str(&shader);
@@ -731,7 +732,8 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
                         count: 2 * self.compute_pipelines.len() as u32,
                         ty: wgpu::QueryType::Timestamp,
                     }))
-                }
+                };
+                log::info!("Shader compiled in {}s", now.elapsed().as_micros() as f32 * 1e-6);
             },
             Err(e) => {
                 log::error!("Error parsing WGSL: {e}");
@@ -828,6 +830,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
     }
 
     pub fn load_channel(&mut self, index: usize, bytes: &[u8]) {
+        let now = instant::Instant::now();
         match image::load_from_memory(bytes) {
             Err(e) => log::error!("load_channel: {e}"),
             Ok(im) => {
@@ -843,9 +846,11 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
                 self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
             }
         }
+        log::info!("Channel {index} loaded in {}s", now.elapsed().as_micros() as f32 * 1e-6);
     }
 
     pub fn load_channel_hdr(&mut self, index: usize, bytes: &[u8]) -> Result<(), String> {
+        let now = instant::Instant::now();
         let decoder = image::codecs::hdr::HdrDecoder::new(bytes).map_err(|e| e.to_string())?;
         let meta = decoder.metadata();
         let pixels = decoder.read_image_native().map_err(|e| e.to_string())?;
@@ -858,6 +863,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
             wgpu::FilterMode::Linear,
         ).create_texture(&self.wgpu, meta.width, meta.height, 1 + (std::cmp::max(meta.width, meta.height) as f32).log2() as u32);
         self.compute_bind_group = create_compute_bind_group(&self.wgpu, &self.compute_bind_group_layout, &self.uniforms, &self.channels);
+        log::info!("Channel {index} loaded in {}s", now.elapsed().as_micros() as f32 * 1e-6);
         Ok(())
     }
 

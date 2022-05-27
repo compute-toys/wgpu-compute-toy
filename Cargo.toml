@@ -55,6 +55,10 @@ version = "0.24"
 default-features = false
 features = ["png", "jpeg", "hdr"]
 
+[dependencies.instant]
+version = "0.1"
+features = ["wasm-bindgen"]
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3.13"
 

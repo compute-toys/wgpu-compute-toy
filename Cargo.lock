@@ -1724,6 +1724,7 @@ dependencies = [
  "console_log",
  "env_logger",
  "image",
+ "instant",
  "js-sys",
  "lazy-regex",
  "lazy_static",
