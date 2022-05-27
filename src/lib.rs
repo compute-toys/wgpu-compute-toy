@@ -1,6 +1,6 @@
 mod utils;
 mod blit;
-mod context;
+pub mod context;
 
 use context::WgpuContext;
 use wasm_bindgen::prelude::*;
@@ -97,7 +97,8 @@ const NUM_ASSERT_COUNTERS: usize = 10;
 
 #[wasm_bindgen]
 pub struct WgpuToyRenderer {
-    wgpu: WgpuContext,
+    #[wasm_bindgen(skip)]
+    pub wgpu: WgpuContext,
     screen_width: u32,
     screen_height: u32,
     time: Time,
@@ -576,6 +577,7 @@ impl WgpuToyRenderer {
         if let Some(buf) = staging_buffer {
             self.wgpu.device.poll(wgpu::Maintain::Wait);
             let numthreads = self.screen_width * self.screen_height;
+            #[cfg(target_arch = "wasm32")]
             wasm_bindgen_futures::spawn_local(async move {
                 let buffer_slice = buf.slice(..);
                 match buffer_slice.map_async(wgpu::MapMode::Read).await {
@@ -595,8 +597,15 @@ impl WgpuToyRenderer {
                 buf.unmap();
             });
         }
+        #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(self.staging_belt.recall());
         frame.present();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let executor = async_executor::LocalExecutor::new();
+            executor.spawn(self.staging_belt.recall()).detach();
+            executor.try_tick();
+        }
     }
 
     pub fn prelude(&self) -> String {
@@ -689,6 +698,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
     }
 
     fn handle_success(&self, entry_points: Vec<String>) {
+        #[cfg(target_arch = "wasm32")]
         self.on_success_cb.call(entry_points);
     }
 

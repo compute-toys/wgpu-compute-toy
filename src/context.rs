@@ -4,6 +4,8 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub struct WgpuContext {
     #[wasm_bindgen(skip)]
+    pub event_loop: Option<winit::event_loop::EventLoop<()>>,
+    #[wasm_bindgen(skip)]
     pub window: winit::window::Window,
     #[wasm_bindgen(skip)]
     pub device: wgpu::Device,
@@ -16,10 +18,9 @@ pub struct WgpuContext {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn init_window(bind_id: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
+fn init_window(event_loop: &winit::event_loop::EventLoop<()>, bind_id: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
     console_log::init(); // FIXME only do this once
     set_panic_hook();
-    let event_loop = winit::event_loop::EventLoop::new();
     let win = web_sys::window().ok_or("window is None")?;
     let doc = win.document().ok_or("document is None")?;
     let element = doc.get_element_by_id(&bind_id).ok_or(format!("cannot find element {bind_id}"))?;
@@ -29,21 +30,21 @@ fn init_window(bind_id: String) -> Result<winit::window::Window, Box<dyn std::er
     use winit::platform::web::WindowBuilderExtWebSys;
     let window = winit::window::WindowBuilder::new()
         .with_canvas(Some(canvas))
-        .build(&event_loop)?;
+        .build(event_loop)?;
     Ok(window)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn init_window(_: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
+fn init_window(event_loop: &winit::event_loop::EventLoop<()>, _: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
     env_logger::init();
-    let event_loop = winit::event_loop::EventLoop::new();
-    winit::window::Window::new(&event_loop).map_err(Box::from)
+    winit::window::Window::new(event_loop).map_err(Box::from)
 }
 
 // FIXME: async fn(&str) doesn't currently work with wasm_bindgen: https://stackoverflow.com/a/63655324/78204
 #[wasm_bindgen]
 pub async fn init_wgpu(bind_id: String) -> Result<WgpuContext, String> {
-    let window = init_window(bind_id).map_err(|e| e.to_string())?;
+    let event_loop = winit::event_loop::EventLoop::new();
+    let window = init_window(&event_loop, bind_id).map_err(|e| e.to_string())?;
     let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
@@ -66,6 +67,7 @@ pub async fn init_wgpu(bind_id: String) -> Result<WgpuContext, String> {
         present_mode: wgpu::PresentMode::Fifo, // vsync
     });
     Ok(WgpuContext {
+        event_loop: Some(event_loop),
         window,
         device,
         queue,
