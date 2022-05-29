@@ -801,7 +801,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
 
         // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
         let prelude_len = count_newlines(&self.prelude());
-        let re_parser = lazy_regex::regex!(r"Parser:\s:(\d+):(\d+)\s([\s\S]*?)\s+Shader");
+        let re_parser = lazy_regex::regex!(r"(?s):(\d+):(\d+) (.*)");
         let re_invalid = lazy_regex::regex!(r"\[Invalid \w+\] is invalid.");
         let on_error_cb = self.on_error_cb.clone();
         self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
