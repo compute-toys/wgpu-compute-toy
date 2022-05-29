@@ -70,6 +70,7 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: String) -> Result<WgpuC
         height,
         present_mode: wgpu::PresentMode::Fifo, // vsync
     });
+    log::info!("adapter.limits = {:#?}", adapter.limits());
     Ok(WgpuContext {
         event_loop: Some(event_loop),
         window,
