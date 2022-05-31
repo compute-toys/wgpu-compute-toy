@@ -769,8 +769,8 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
     }
 
     pub fn resize(&mut self, width: u32, height: u32, scale: f32) {
-        self.screen_width = (width as f32 / scale) as u32;
-        self.screen_height = (height as f32 / scale) as u32;
+        self.screen_width = (width as f32 * scale) as u32;
+        self.screen_height = (height as f32 * scale) as u32;
         self.reset();
         self.wgpu.window.set_inner_size(winit::dpi::PhysicalSize::new(width, height));
     }
@@ -793,7 +793,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
             &self.uniforms.tex_screen.create_view(&Default::default()),
             blit::ColourSpace::Linear,
             self.wgpu.surface_format,
-            wgpu::FilterMode::Nearest);
+            wgpu::FilterMode::Linear);
     }
 
     pub fn on_error(&mut self, callback: js_sys::Function) {
