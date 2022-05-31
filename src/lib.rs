@@ -119,6 +119,7 @@ pub struct WgpuToyRenderer {
     pass_f32: bool,
     screen_blitter: blit::Blitter,
     query_set: Option<wgpu::QuerySet>,
+    last_stats: instant::Instant,
 }
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
@@ -493,6 +494,7 @@ impl WgpuToyRenderer {
             custom_values: vec![0.],
             pass_f32: false,
             query_set: None,
+            last_stats: instant::Instant::now(),
         }
     }
 
@@ -504,16 +506,22 @@ impl WgpuToyRenderer {
     }
 
     fn render_to(&mut self, frame: wgpu::SurfaceTexture) {
-        let assert_period = 100;
+        let stats_period = 100;
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
         let custom_bytes: Vec<u8> = self.custom_values.iter().flat_map(|x| bytemuck::bytes_of(x).iter().copied()).collect();
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &custom_bytes, &self.uniforms.custom);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.time), &self.uniforms.time);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.keys.as_raw_slice(), &self.uniforms.keys);
-        if self.time.frame % assert_period == 0 {
+        if self.time.frame % stats_period == 0 {
             //encoder.clear_buffer(&self.uniforms.debug_buffer, 0, None); // doesn't work for some reason
             stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&[0u32; NUM_ASSERT_COUNTERS]), &self.uniforms.debug_buffer);
+
+            if self.time.frame > 0 {
+                let mean = self.last_stats.elapsed().as_secs_f32() / stats_period as f32;
+                self.last_stats = instant::Instant::now();
+                log::info!("{} fps ({} ms)", 1. / mean, 1e3 * mean);
+            }
         }
         self.staging_belt.finish();
         if SHADER_ERROR.swap(false, Ordering::SeqCst) {
@@ -558,7 +566,7 @@ impl WgpuToyRenderer {
         let mut staging_buffer = None;
         let query_offset = NUM_ASSERT_COUNTERS * size_of::<u32>();
         let query_count = 2 * self.compute_pipelines.len();
-        if self.time.frame % assert_period == assert_period - 1 {
+        if self.time.frame % stats_period == stats_period - 1 {
             let buf = self.wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
                 size: (query_offset + query_count * size_of::<u64>()) as wgpu::BufferAddress,
@@ -588,7 +596,7 @@ impl WgpuToyRenderer {
                         let timestamps: &[u64] = bytemuck::cast_slice(&data[query_offset..]);
                         for (i, count) in assertions.iter().enumerate() {
                             if count > &0 {
-                                let percent = *count as f32 / (numthreads * assert_period) as f32 * 100.0;
+                                let percent = *count as f32 / (numthreads * stats_period) as f32 * 100.0;
                                 log::warn!("Assertion {i} failed in {percent}% of threads");
                             }
                         }
