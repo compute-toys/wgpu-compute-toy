@@ -307,7 +307,7 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) 
         }),
         storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: size_of::<i32>() as u64 * 4 * width as u64 * height as u64,
+            size: 134217728, // default limit (128 MiB)
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         }),
