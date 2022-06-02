@@ -92,7 +92,7 @@ unsafe impl Send for ErrorCallback {}
 unsafe impl Sync for ErrorCallback {}
 
 const NUM_KEYCODES: usize = 256;
-const MAX_CUSTOM_PARAMS: usize = 16;
+const MAX_CUSTOM_PARAMS: usize = 32;
 const NUM_ASSERT_COUNTERS: usize = 10;
 
 #[wasm_bindgen]
