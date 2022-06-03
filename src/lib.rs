@@ -280,6 +280,22 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
 }
 
 fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) -> Uniforms {
+    let pixels = (width * height) as usize;
+    let sizes = [
+        // buffers
+        size_of::<Time>(),
+        size_of::<Mouse>(),
+        NUM_KEYCODES / 8,
+        MAX_CUSTOM_PARAMS * size_of::<f32>(),
+        134217728, // default limit (128 MiB)
+        NUM_ASSERT_COUNTERS * size_of::<u32>(),
+
+        // textures
+        pixels * 4 * if pass_f32 { size_of::<[i32; 4]>() } else { size_of::<[i16; 4]>() },
+        pixels * 4 * if pass_f32 { size_of::<[i32; 4]>() } else { size_of::<[i16; 4]>() },
+        pixels * 1 * size_of::<[i16; 4]>(),
+    ];
+    log::info!("VRAM: allocating {} MiB of buffers and textures", sizes.iter().sum::<usize>() >> 20);
     Uniforms {
         time: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
