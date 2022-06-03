@@ -36,7 +36,8 @@ struct Uniforms {
     mouse: wgpu::Buffer,
     keys: wgpu::Buffer,
     custom: wgpu::Buffer,
-    storage_buffer: wgpu::Buffer,
+    atomic_storage_buffer: wgpu::Buffer,
+    float_storage_buffer: wgpu::Buffer,
     debug_buffer: wgpu::Buffer,
     tex_read: wgpu::Texture,
     tex_write: wgpu::Texture,
@@ -49,7 +50,8 @@ impl Drop for Uniforms {
         self.mouse.destroy();
         self.keys.destroy();
         self.custom.destroy();
-        self.storage_buffer.destroy();
+        self.atomic_storage_buffer.destroy();
+        self.float_storage_buffer.destroy();
         self.debug_buffer.destroy();
         self.tex_read.destroy();
         self.tex_write.destroy();
@@ -138,7 +140,7 @@ pub struct WgpuToyRenderer {
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
-fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 17] {
+fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 18] {
     [
         wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -235,6 +237,18 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
+            binding: 9,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage {
+                    read_only: false
+                },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
             binding: 10,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
@@ -302,6 +316,7 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) 
         NUM_KEYCODES / 8,
         MAX_CUSTOM_PARAMS * size_of::<f32>(),
         134217728, // default limit (128 MiB)
+        134217728, // default limit (128 MiB)
         NUM_ASSERT_COUNTERS * size_of::<u32>(),
 
         // textures
@@ -335,7 +350,13 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) 
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         }),
-        storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+        atomic_storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 134217728, // default limit (128 MiB)
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        }),
+        float_storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: 134217728, // default limit (128 MiB)
             usage: wgpu::BufferUsages::STORAGE,
@@ -405,7 +426,7 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
             wgpu::BindGroupEntry { binding: 2, resource: uniforms.mouse.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 3, resource: uniforms.keys.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&uniforms.tex_screen.create_view(&Default::default())) },
-            wgpu::BindGroupEntry { binding: 5, resource: uniforms.storage_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 5, resource: uniforms.atomic_storage_buffer.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&uniforms.tex_read.create_view(&wgpu::TextureViewDescriptor {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
@@ -415,6 +436,7 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
                 ..Default::default()
             })) },
             wgpu::BindGroupEntry { binding: 8, resource: uniforms.debug_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 9, resource: uniforms.float_storage_buffer.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&channels[0].create_view(&Default::default())) },
             wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&channels[1].create_view(&Default::default())) },
             wgpu::BindGroupEntry { binding: 20, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
@@ -676,6 +698,7 @@ struct Mouse { pos: uint2, click: int };
 @group(0) @binding(6) var pass_in: texture_2d_array<f32>;
 @group(0) @binding(7) var pass_out: texture_storage_2d_array<{pass_format},write>;
 @group(0) @binding(8) var<storage,read_write> _assert_counts: array<atomic<u32>>;
+@group(0) @binding(9) var<storage,read_write> float_storage: array<vec4<f32>>;
 @group(0) @binding(10) var channel0: texture_2d<f32>;
 @group(0) @binding(11) var channel1: texture_2d<f32>;
 @group(0) @binding(20) var nearest: sampler;
