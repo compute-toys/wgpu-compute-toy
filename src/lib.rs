@@ -43,6 +43,20 @@ struct Uniforms {
     tex_screen: wgpu::Texture,
 }
 
+impl Drop for Uniforms {
+    fn drop(&mut self) {
+        self.time.destroy();
+        self.mouse.destroy();
+        self.keys.destroy();
+        self.custom.destroy();
+        self.storage_buffer.destroy();
+        self.debug_buffer.destroy();
+        self.tex_read.destroy();
+        self.tex_write.destroy();
+        self.tex_screen.destroy();
+    }
+}
+
 #[derive(Clone)]
 struct ErrorCallback(Option<js_sys::Function>);
 
