@@ -5,7 +5,6 @@ pub mod context;
 use context::WgpuContext;
 use wasm_bindgen::prelude::*;
 use naga::front::wgsl;
-use naga::front::wgsl::ParseError;
 use num::Integer;
 use bitvec::prelude::*;
 use std::mem::{size_of, take};
@@ -36,6 +35,7 @@ struct Uniforms {
     mouse: wgpu::Buffer,
     keys: wgpu::Buffer,
     custom: wgpu::Buffer,
+    user_data: wgpu::Buffer,
     atomic_storage_buffer: wgpu::Buffer,
     float_storage_buffer: wgpu::Buffer,
     debug_buffer: wgpu::Buffer,
@@ -50,6 +50,7 @@ impl Drop for Uniforms {
         self.mouse.destroy();
         self.keys.destroy();
         self.custom.destroy();
+        self.user_data.destroy();
         self.atomic_storage_buffer.destroy();
         self.float_storage_buffer.destroy();
         self.debug_buffer.destroy();
@@ -110,6 +111,7 @@ unsafe impl Sync for ErrorCallback {}
 const NUM_KEYCODES: usize = 256;
 const MAX_CUSTOM_PARAMS: usize = 32;
 const NUM_ASSERT_COUNTERS: usize = 10;
+const USER_DATA_BYTES: usize = 4096;
 
 #[wasm_bindgen]
 pub struct WgpuToyRenderer {
@@ -122,6 +124,7 @@ pub struct WgpuToyRenderer {
     keys: BitArr!(for NUM_KEYCODES, in u8, Lsb0),
     custom_names: Vec<String>,
     custom_values: Vec<f32>,
+    user_data: std::collections::HashMap<String, Vec<u32>>,
     uniforms: Uniforms,
     compute_bind_group_layout: wgpu::BindGroupLayout,
     compute_pipeline_layout: wgpu::PipelineLayout,
@@ -140,7 +143,7 @@ pub struct WgpuToyRenderer {
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
-fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 18] {
+fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEntry; 19] {
     [
         wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -269,6 +272,18 @@ fn compute_bind_group_layout_entries(pass_f32: bool) -> [wgpu::BindGroupLayoutEn
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
+            binding: 19,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage {
+                    read_only: true
+                },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
             binding: 20,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
@@ -315,6 +330,7 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) 
         size_of::<Mouse>(),
         NUM_KEYCODES / 8,
         MAX_CUSTOM_PARAMS * size_of::<f32>(),
+        USER_DATA_BYTES,
         134217728, // default limit (128 MiB)
         134217728, // default limit (128 MiB)
         NUM_ASSERT_COUNTERS * size_of::<u32>(),
@@ -348,6 +364,12 @@ fn create_uniforms(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) 
             label: None,
             size: (MAX_CUSTOM_PARAMS * size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        }),
+        user_data: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: USER_DATA_BYTES as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         }),
         atomic_storage_buffer: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -439,6 +461,7 @@ fn create_compute_bind_group(wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout,
             wgpu::BindGroupEntry { binding: 9, resource: uniforms.float_storage_buffer.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&channels[0].create_view(&Default::default())) },
             wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&channels[1].create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 19, resource: uniforms.user_data.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 20, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&Default::default())) },
             wgpu::BindGroupEntry { binding: 21, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
                 mag_filter: wgpu::FilterMode::Linear,
@@ -544,6 +567,7 @@ impl WgpuToyRenderer {
             channels,
             custom_names: vec!["_dummy".into()], // just to avoid creating an empty struct in wgsl
             custom_values: vec![0.],
+            user_data: std::collections::HashMap::from([("_dummy".into(), vec![0])]),
             pass_f32: false,
             query_set: None,
             last_stats: instant::Instant::now(),
@@ -561,7 +585,9 @@ impl WgpuToyRenderer {
         let stats_period = 100;
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
         let custom_bytes: Vec<u8> = self.custom_values.iter().flat_map(|x| bytemuck::bytes_of(x).iter().copied()).collect();
+        let user_data: Vec<u8> = self.user_data.iter().flat_map(|(_,x)| bytemuck::cast_slice(x).iter().copied()).collect();
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &custom_bytes, &self.uniforms.custom);
+        stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &user_data, &self.uniforms.user_data);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.time), &self.uniforms.time);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, bytemuck::bytes_of(&self.mouse), &self.uniforms.mouse);
         stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder, &self.keys.as_raw_slice(), &self.uniforms.keys);
@@ -688,6 +714,13 @@ struct Mouse { pos: uint2, click: int };
         }
         s.push_str("};\n");
         s.push_str("@group(0) @binding(0) var<uniform> custom: Custom;");
+        s.push_str("struct Data {");
+        for (key, val) in self.user_data.iter() {
+            let n = val.len();
+            s.push_str(&format!("{key}: array<u32,{n}>,"));
+        }
+        s.push_str("};");
+        s.push_str("@group(0) @binding(19) var<storage,read> data: Data;");
         let pass_format = if self.pass_f32 { "rgba32float" } else { "rgba16float" };
         s.push_str(&format!(r#"
 @group(0) @binding(1) var<uniform> time: Time;
@@ -751,23 +784,65 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
         return s;
     }
 
-    fn handle_error(&self, e: ParseError, wgsl: &str) {
-        let prelude_len = count_newlines(&self.prelude()); // in case we need to report errors
-        let (row, col) = e.location(&wgsl);
-        let summary = e.emit_to_string(&wgsl);
-        self.on_error_cb.call(&summary, if row >= prelude_len { row - prelude_len } else { 0 }, col);
-    }
-
     fn handle_success(&self, entry_points: Vec<String>) {
         #[cfg(target_arch = "wasm32")]
         self.on_success_cb.call(entry_points);
     }
 
+    fn preprocess(&mut self, shader: &str) -> Option<(String, Vec<usize>)> {
+        self.user_data = std::collections::HashMap::from([("_dummy".into(), vec![0])]); // clear
+        let mut sourcemap = vec![0];
+        let mut wgsl = String::new();
+        let mut push_line = |n, s| {
+            sourcemap.push(n);
+            wgsl.push_str(s);
+            wgsl.push_str("\n");
+        };
+        for (line, n) in shader.lines().zip(1..) {
+            push_line(n, line);
+        }
+        Some((wgsl, sourcemap))
+    }
+
     pub fn set_shader(&mut self, shader: &str) {
         let now = instant::Instant::now();
-        let mut wgsl: String = self.prelude();
-        let shader: String = shader.into();
-        wgsl.push_str(&shader);
+        if let Some((source, sourcemap)) = self.preprocess(shader) {
+        let prelude = self.prelude(); // prelude should be generated after preprocessor has run
+
+        // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
+        let prelude_len = count_newlines(&prelude);
+        let re_parser = lazy_regex::regex!(r"(?s):(\d+):(\d+) (.*)");
+        let re_invalid = lazy_regex::regex!(r"\[Invalid \w+\] is invalid.");
+        let on_error_cb = self.on_error_cb.clone();
+        let sourcemap_clone = sourcemap.clone();
+        self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
+            let err = &e.to_string();
+            if re_invalid.is_match(err) {
+                return;
+            }
+            match re_parser.captures(err) {
+                None => {
+                    log::error!("{e}");
+                    on_error_cb.call(err, 0, 0);
+                },
+                Some(cap) => {
+                    let row = cap[1].parse().unwrap_or(prelude_len);
+                    let col = cap[2].parse().unwrap_or(0);
+                    let summary = &cap[3];
+                    let mut n = 0;
+                    if row >= prelude_len {
+                        n = row - prelude_len;
+                    }
+                    if n < sourcemap_clone.len() {
+                        n = sourcemap_clone[n];
+                    }
+                    on_error_cb.call(summary, n, col);
+                    SHADER_ERROR.store(true, Ordering::SeqCst);
+                }
+            }
+        });
+
+        let wgsl = prelude + &source;
         match wgsl::parse_str(&wgsl) {
             Ok(module) => {
                 let entry_points: Vec<_> = module.entry_points.iter()
@@ -798,8 +873,18 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
             },
             Err(e) => {
                 log::error!("Error parsing WGSL: {e}");
-                self.handle_error(e, &wgsl);
+                let (row, col) = e.location(&wgsl);
+                let summary = e.emit_to_string(&wgsl);
+                let mut n = 0;
+                if row >= prelude_len {
+                    n = row - prelude_len;
+                }
+                if n < sourcemap.len() {
+                    n = sourcemap[n];
+                }
+                self.on_error_cb.call(&summary, n, col);
             },
+        }
         }
     }
 
@@ -859,31 +944,6 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
 
     pub fn on_error(&mut self, callback: js_sys::Function) {
         self.on_error_cb = ErrorCallback(Some(callback));
-
-        // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
-        let prelude_len = count_newlines(&self.prelude());
-        let re_parser = lazy_regex::regex!(r"(?s):(\d+):(\d+) (.*)");
-        let re_invalid = lazy_regex::regex!(r"\[Invalid \w+\] is invalid.");
-        let on_error_cb = self.on_error_cb.clone();
-        self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
-            let err = &e.to_string();
-            if re_invalid.is_match(err) {
-                return;
-            }
-            match re_parser.captures(err) {
-                None => {
-                    log::error!("{e}");
-                    on_error_cb.call(err, 0, 0);
-                },
-                Some(cap) => {
-                    let row = cap[1].parse().unwrap_or(prelude_len);
-                    let col = cap[2].parse().unwrap_or(0);
-                    let summary = &cap[3];
-                    on_error_cb.call(summary, if row >= prelude_len { row - prelude_len } else { 0 }, col);
-                    SHADER_ERROR.store(true, Ordering::SeqCst);
-                }
-            }
-        });
     }
 
     pub fn on_success(&mut self, callback: js_sys::Function) {

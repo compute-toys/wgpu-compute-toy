@@ -8,3 +8,12 @@ pub fn set_panic_hook() {
     #[cfg(feature = "console_error_panic_hook")]
     console_error_panic_hook::set_once();
 }
+
+pub fn parse_u32(value: &str) -> Result<u32, Box<dyn std::error::Error>> {
+    let value = value.trim().trim_end_matches('u');
+    if value.starts_with("0x") {
+        Ok(<u32>::from_str_radix(value.strip_prefix("0x").unwrap(), 16)?)
+    } else {
+        Ok(value.parse::<u32>()?)
+    }
+}
