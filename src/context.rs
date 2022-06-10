@@ -18,15 +18,26 @@ pub struct WgpuContext {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn init_window(size: winit::dpi::Size, event_loop: &winit::event_loop::EventLoop<()>, bind_id: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
+fn init_window(
+    size: winit::dpi::Size,
+    event_loop: &winit::event_loop::EventLoop<()>,
+    bind_id: String,
+) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
     console_log::init(); // FIXME only do this once
     set_panic_hook();
     let win = web_sys::window().ok_or("window is None")?;
     let doc = win.document().ok_or("document is None")?;
-    let element = doc.get_element_by_id(&bind_id).ok_or(format!("cannot find element {bind_id}"))?;
+    let element = doc
+        .get_element_by_id(&bind_id)
+        .ok_or(format!("cannot find element {bind_id}"))?;
     use wasm_bindgen::JsCast;
-    let canvas = element.dyn_into::<web_sys::HtmlCanvasElement>().or(Err("cannot cast to canvas"))?;
-    canvas.get_context("webgpu").or(Err("no webgpu"))?.ok_or("no webgpu")?;
+    let canvas = element
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .or(Err("cannot cast to canvas"))?;
+    canvas
+        .get_context("webgpu")
+        .or(Err("no webgpu"))?
+        .ok_or("no webgpu")?;
     use winit::platform::web::WindowBuilderExtWebSys;
     let window = winit::window::WindowBuilder::new()
         .with_inner_size(size)
@@ -36,7 +47,11 @@ fn init_window(size: winit::dpi::Size, event_loop: &winit::event_loop::EventLoop
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn init_window(size: winit::dpi::Size, event_loop: &winit::event_loop::EventLoop<()>, _: String) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
+fn init_window(
+    size: winit::dpi::Size,
+    event_loop: &winit::event_loop::EventLoop<()>,
+    _: String,
+) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
     env_logger::init();
     let window = winit::window::WindowBuilder::new()
         .with_inner_size(size)
@@ -58,18 +73,25 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: String) -> Result<WgpuC
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
         })
-        .await.ok_or("unable to create adapter")?;
+        .await
+        .ok_or("unable to create adapter")?;
     let (device, queue) = adapter
         .request_device(&Default::default(), None)
-        .await.map_err(|e| e.to_string())?;
-    let surface_format = surface.get_preferred_format(&adapter).unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
-    surface.configure(&device, &wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: surface_format,
-        width,
-        height,
-        present_mode: wgpu::PresentMode::Fifo, // vsync
-    });
+        .await
+        .map_err(|e| e.to_string())?;
+    let surface_format = surface
+        .get_preferred_format(&adapter)
+        .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+    surface.configure(
+        &device,
+        &wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::Fifo, // vsync
+        },
+    );
     log::info!("adapter.limits = {:#?}", adapter.limits());
     Ok(WgpuContext {
         event_loop: Some(event_loop),

@@ -12,7 +12,10 @@ pub fn set_panic_hook() {
 pub fn parse_u32(value: &str) -> Result<u32, Box<dyn std::error::Error>> {
     let value = value.trim().trim_end_matches('u');
     if value.starts_with("0x") {
-        Ok(<u32>::from_str_radix(value.strip_prefix("0x").unwrap(), 16)?)
+        Ok(<u32>::from_str_radix(
+            value.strip_prefix("0x").unwrap(),
+            16,
+        )?)
     } else {
         Ok(value.parse::<u32>()?)
     }
