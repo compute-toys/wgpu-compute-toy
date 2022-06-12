@@ -3,7 +3,7 @@ mod blit;
 pub mod context;
 mod utils;
 
-use context::WgpuContext;
+use context::{init_wgpu, WgpuContext};
 use naga::front::wgsl;
 use num::Integer;
 use std::collections::HashMap;
@@ -107,9 +107,18 @@ fn count_newlines(s: &str) -> usize {
     s.as_bytes().iter().filter(|&&c| c == b'\n').count()
 }
 
+// FIXME: async fn(&str) doesn't currently work with wasm_bindgen: https://stackoverflow.com/a/63655324/78204
 #[wasm_bindgen]
+pub async fn create_renderer(
+    width: u32,
+    height: u32,
+    bind_id: String,
+) -> Result<WgpuToyRenderer, String> {
+    let wgpu = init_wgpu(width, height, &bind_id).await?;
+    Ok(WgpuToyRenderer::new(wgpu))
+}
+
 impl WgpuToyRenderer {
-    #[wasm_bindgen(constructor)]
     pub fn new(wgpu: WgpuContext) -> WgpuToyRenderer {
         let size = wgpu.window.inner_size();
         let bindings = bind::Bindings::new(&wgpu, size.width, size.height, false);
@@ -140,7 +149,10 @@ impl WgpuToyRenderer {
             last_stats: instant::Instant::now(),
         }
     }
+}
 
+#[wasm_bindgen]
+impl WgpuToyRenderer {
     pub fn render(&mut self) {
         match self.wgpu.surface.get_current_texture() {
             Err(e) => log::error!("Unable to get framebuffer: {e}"),
