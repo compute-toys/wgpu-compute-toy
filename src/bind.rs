@@ -149,7 +149,7 @@ pub struct Bindings {
     pub tex_screen: TextureBinding,
     pub tex_read: TextureBinding,
     pub tex_write: TextureBinding,
-    pub channels: [TextureBinding; 2],
+    pub channels: Vec<TextureBinding>,
 
     nearest: SamplerBinding,
     bilinear: SamplerBinding,
@@ -159,8 +159,15 @@ pub struct Bindings {
     trilinear_repeat: SamplerBinding,
 }
 
+impl Drop for Bindings {
+    fn drop(&mut self) {
+        log::info!("Destroying bindings");
+    }
+}
+
 impl Bindings {
     pub fn new(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) -> Self {
+        log::info!("Creating bindings");
         let uniform_buffer = wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: false,
@@ -442,7 +449,7 @@ impl Bindings {
                 },
                 decl: format!("var pass_out: texture_storage_2d_array<{pass_format},write>"),
             },
-            channels: [
+            channels: vec![
                 TextureBinding {
                     view: channel0.create_view(&Default::default()),
                     device: channel0,

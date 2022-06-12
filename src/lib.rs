@@ -576,7 +576,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
         std::mem::swap(&mut self.bindings, &mut bindings);
         self.bindings.custom.host = bindings.custom.host.clone();
         self.bindings.user_data.host = bindings.user_data.host.clone();
-        self.bindings.channels = bindings.channels;
+        self.bindings.channels = take(&mut bindings.channels);
         self.compute_pipeline_layout = self.bindings.create_pipeline_layout(&self.wgpu);
         self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu);
         self.screen_blitter = blit::Blitter::new(
