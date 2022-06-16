@@ -1,3 +1,5 @@
+use crate::WGSLError;
+
 pub fn set_panic_hook() {
     // When the `console_error_panic_hook` feature is enabled, we can call the
     // `set_panic_hook` function at least once during initialization, and then
@@ -9,14 +11,15 @@ pub fn set_panic_hook() {
     console_error_panic_hook::set_once();
 }
 
-pub fn parse_u32(value: &str) -> Result<u32, Box<dyn std::error::Error>> {
+pub fn parse_u32(value: &str, line: usize) -> Result<u32, WGSLError> {
     let value = value.trim().trim_end_matches('u');
     if value.starts_with("0x") {
-        Ok(<u32>::from_str_radix(
-            value.strip_prefix("0x").unwrap(),
-            16,
-        )?)
+        <u32>::from_str_radix(value.strip_prefix("0x").unwrap(), 16)
     } else {
-        Ok(value.parse::<u32>()?)
+        value.parse::<u32>()
     }
+    .or(Err(WGSLError {
+        summary: format!("Cannot parse '{value}' as u32"),
+        line,
+    }))
 }

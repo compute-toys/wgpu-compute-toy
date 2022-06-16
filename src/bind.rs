@@ -141,8 +141,8 @@ pub struct Bindings {
     pub custom: BufferBinding<(Vec<String>, Vec<f32>)>,
     pub user_data: BufferBinding<HashMap<String, Vec<u32>>>,
 
-    pub atomic_storage: BufferBinding<()>,
-    pub float_storage: BufferBinding<()>,
+    pub storage1: BufferBinding<()>,
+    pub storage2: BufferBinding<()>,
     pub debug_buffer: BufferBinding<()>,
     pub dispatch_info: BufferBinding<()>,
 
@@ -344,7 +344,7 @@ impl Bindings {
                 decl: "var<storage,read> data: Data".to_string(),
             },
 
-            atomic_storage: BufferBinding {
+            storage1: BufferBinding {
                 host: (),
                 serialise: Box::new(|_| vec![]),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -355,9 +355,9 @@ impl Bindings {
                 }),
                 layout: storage_buffer,
                 bind: Box::new(wgpu::Buffer::as_entire_buffer_binding),
-                decl: "var<storage,read_write> atomic_storage: array<atomic<i32>>".to_string(),
+                decl: String::new(),
             },
-            float_storage: BufferBinding {
+            storage2: BufferBinding {
                 host: (),
                 serialise: Box::new(|_| vec![]),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -368,7 +368,7 @@ impl Bindings {
                 }),
                 layout: storage_buffer,
                 bind: Box::new(wgpu::Buffer::as_entire_buffer_binding),
-                decl: "var<storage,read_write> float_storage: array<vec4<f32>>".to_string(),
+                decl: String::new(),
             },
             debug_buffer: BufferBinding {
                 host: (),
@@ -404,7 +404,7 @@ impl Bindings {
                     offset: 0,
                     size: wgpu::BufferSize::new(size_of::<u32>() as u64),
                 }),
-                decl: "var<uniform> dispatch_id: uint".to_string(),
+                decl: "var<uniform> dispatch: DispatchInfo".to_string(),
             },
 
             tex_screen: TextureBinding {
@@ -517,13 +517,13 @@ impl Bindings {
 
     fn to_vec(&self) -> Vec<&dyn Binding> {
         vec![
+            &self.storage1,
+            &self.storage2,
             &self.time,
             &self.mouse,
             &self.keys,
             &self.custom,
             &self.user_data,
-            &self.atomic_storage,
-            &self.float_storage,
             &self.debug_buffer,
             &self.dispatch_info,
             &self.tex_screen,
@@ -587,7 +587,14 @@ impl Bindings {
         self.to_vec()
             .iter()
             .enumerate()
-            .map(|(i, b)| format!("@group(0) @binding({i}) {};", b.to_wgsl()))
+            .map(|(i, b)| {
+                let d = b.to_wgsl();
+                if d.is_empty() {
+                    String::new()
+                } else {
+                    format!("@group(0) @binding({i}) {};", b.to_wgsl())
+                }
+            })
             .intersperse("\n".to_string())
             .collect()
     }

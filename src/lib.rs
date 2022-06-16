@@ -4,41 +4,49 @@ pub mod context;
 mod utils;
 
 use context::{init_wgpu, WgpuContext};
+use lazy_regex::regex;
 use naga::front::wgsl;
 use num::Integer;
 use std::collections::HashMap;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
+use utils::parse_u32;
 use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    fn wgsl_error_handler(summary: &str, row: usize, col: usize);
+}
+
+pub struct WGSLError {
+    summary: String,
+    line: usize,
+}
+
+struct SourceMap {
+    source: String,
+    map: Vec<usize>,
+}
+
+impl SourceMap {
+    fn new() -> Self {
+        Self {
+            source: String::new(),
+            map: vec![0],
+        }
+    }
+    fn push_line(&mut self, s: &str, n: usize) {
+        self.source.push_str(s);
+        self.source.push('\n');
+        self.map.push(n);
+    }
+}
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
-#[derive(Clone)]
-struct ErrorCallback(Option<js_sys::Function>);
-
-impl ErrorCallback {
-    fn call(&self, summary: &str, row: usize, col: usize) {
-        match self.0 {
-            None => log::error!("No error callback registered"),
-            Some(ref callback) => {
-                let res = callback.call3(
-                    &JsValue::NULL,
-                    &JsValue::from(summary),
-                    &JsValue::from(row),
-                    &JsValue::from(col),
-                );
-                match res {
-                    Err(error) => log::error!("Error calling registered error callback: {error:?}"),
-                    _ => (),
-                };
-            }
-        }
-    }
-}
 
 #[derive(Clone)]
 struct SuccessCallback(Option<js_sys::Function>);
@@ -66,15 +74,11 @@ impl SuccessCallback {
     }
 }
 
-// safe because wasm is single-threaded: https://github.com/rustwasm/wasm-bindgen/issues/1505
-unsafe impl Send for ErrorCallback {}
-unsafe impl Sync for ErrorCallback {}
-
 struct ComputePipeline {
     name: String,
     workgroup_size: [u32; 3],
-    thread_count: Option<[u32; 3]>,
-    dispatch_count: u8,
+    workgroup_count: Option<[u32; 3]>,
+    dispatch_count: u32,
     pipeline: wgpu::ComputePipeline,
 }
 
@@ -84,15 +88,15 @@ pub struct WgpuToyRenderer {
     pub wgpu: WgpuContext,
     screen_width: u32,
     screen_height: u32,
-    thread_count: HashMap<String, [u32; 3]>,
-    dispatch_count: HashMap<String, u8>,
+    workgroup_count: HashMap<String, [u32; 3]>,
+    dispatch_count: HashMap<String, u32>,
+    defines: HashMap<String, String>,
     bindings: bind::Bindings,
     compute_pipeline_layout: wgpu::PipelineLayout,
     last_compute_pipelines: Option<Vec<ComputePipeline>>,
     compute_pipelines: Vec<ComputePipeline>,
     compute_bind_group: wgpu::BindGroup,
     staging_belt: wgpu::util::StagingBelt,
-    on_error_cb: ErrorCallback,
     on_success_cb: SuccessCallback,
     pass_f32: bool,
     screen_blitter: blit::Blitter,
@@ -140,10 +144,10 @@ impl WgpuToyRenderer {
             ),
             wgpu,
             bindings,
-            on_error_cb: ErrorCallback(None),
             on_success_cb: SuccessCallback(None),
-            thread_count: HashMap::new(),
+            workgroup_count: HashMap::new(),
             dispatch_count: HashMap::new(),
+            defines: HashMap::new(),
             pass_f32: false,
             query_set: None,
             last_stats: instant::Instant::now(),
@@ -195,14 +199,16 @@ impl WgpuToyRenderer {
         }
         let mut dispatch_counter = 0;
         for (pass_index, p) in self.compute_pipelines.iter().enumerate() {
-            for i in 0..p.dispatch_count as u32 {
+            for i in 0..p.dispatch_count {
                 let mut compute_pass = encoder.begin_compute_pass(&Default::default());
                 if let Some(q) = &self.query_set {
                     compute_pass.write_timestamp(q, 2 * pass_index as u32);
                 }
-                let thread_count =
-                    p.thread_count
-                        .unwrap_or([self.screen_width, self.screen_height, 1]);
+                let workgroup_count = p.workgroup_count.unwrap_or([
+                    self.screen_width.div_ceil(&p.workgroup_size[0]),
+                    self.screen_height.div_ceil(&p.workgroup_size[1]),
+                    1,
+                ]);
                 compute_pass.set_pipeline(&p.pipeline);
                 self.wgpu.queue.write_buffer(
                     &self.bindings.dispatch_info.buffer(),
@@ -215,11 +221,7 @@ impl WgpuToyRenderer {
                     &[bind::OFFSET_ALIGNMENT as u32 * dispatch_counter as u32],
                 );
                 dispatch_counter += 1;
-                compute_pass.dispatch(
-                    thread_count[0].div_ceil(&p.workgroup_size[0]),
-                    thread_count[1].div_ceil(&p.workgroup_size[1]),
-                    thread_count[2].div_ceil(&p.workgroup_size[2]),
-                );
+                compute_pass.dispatch(workgroup_count[0], workgroup_count[1], workgroup_count[2]);
                 if let Some(q) = &self.query_set {
                     compute_pass.write_timestamp(q, 2 * pass_index as u32 + 1);
                 }
@@ -313,6 +315,20 @@ impl WgpuToyRenderer {
         }
     }
 
+    fn subst_defines(&self, source: &str) -> String {
+        regex!("[[:word:]]+")
+            .replace_all(source, |caps: &regex::Captures| match &caps[0] {
+                "SCREEN_WIDTH" => self.screen_width.to_string(),
+                "SCREEN_HEIGHT" => self.screen_height.to_string(),
+                name => self
+                    .defines
+                    .get(name)
+                    .unwrap_or(&name.to_string())
+                    .to_owned(),
+            })
+            .to_string()
+    }
+
     pub fn prelude(&self) -> String {
         let mut s = String::new();
         for (a, t) in [("int", "i32"), ("uint", "u32"), ("float", "f32")] {
@@ -323,8 +339,9 @@ impl WgpuToyRenderer {
         }
         s.push_str(
             r#"
-struct Time { frame: uint, elapsed: float };
-struct Mouse { pos: uint2, click: int };
+struct Time { frame: uint, elapsed: float }
+struct Mouse { pos: uint2, click: int }
+struct DispatchInfo { id: uint }
 "#,
         );
         s.push_str("struct Custom {\n");
@@ -395,151 +412,224 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
         self.on_success_cb.call(entry_points);
     }
 
-    fn preprocess(&mut self, shader: &str) -> Option<(String, Vec<usize>)> {
+    fn preprocess(&mut self, shader: &str) -> Result<SourceMap, WGSLError> {
         self.bindings.user_data.host = HashMap::from([("_dummy".into(), vec![0])]); // clear
-        self.thread_count.clear();
-        let mut sourcemap = vec![0];
-        let mut wgsl = String::new();
-        let mut push_line = |n, s| {
-            sourcemap.push(n);
-            wgsl.push_str(s);
-            wgsl.push_str("\n");
-        };
+        self.workgroup_count.clear();
+        self.defines.clear();
+        let mut source = SourceMap::new();
+        let mut storage_count = 0;
         for (line, n) in shader.lines().zip(1..) {
             if line.chars().nth(0) == Some('#') {
+                let line = self.subst_defines(line);
                 let tokens: Vec<&str> = line.split(" ").collect();
                 match tokens[..] {
+                    ["#include", name] => {
+                        let include = match regex!(r#""(.*)""#).captures(name) {
+                            None => {
+                                return Err(WGSLError {
+                                    summary: "Path must be enclosed in quotes".to_string(),
+                                    line: n,
+                                })
+                            }
+                            Some(cap) => match &cap[1] {
+                                "Dave_Hoskins/hash" => Some(include_str!(
+                                    "../site/public/include/Dave_Hoskins/hash.wgsl"
+                                )),
+                                "iq/noise_simplex_2d" => Some(include_str!(
+                                    "../site/public/include/iq/noise_simplex_2d.wgsl"
+                                )),
+                                "nikat/noise_simplex_3d" => Some(include_str!(
+                                    "../site/public/include/nikat/noise_simplex_3d.wgsl"
+                                )),
+                                _ => None,
+                            },
+                        };
+                        if let Some(code) = include {
+                            for line in code.lines() {
+                                source.push_line(line, n);
+                            }
+                        } else {
+                            let summary = format!("Cannot find include {name}");
+                            return Err(WGSLError { summary, line: n });
+                        }
+                    }
+                    /*
+                    ["#data", name, "u32", ..] => {
+                        match tokens[3..]
+                            .join("")
+                            .split(",")
+                            .map(|s| utils::parse_u32(s, n))
+                            .collect()
+                        {
+                            Ok::<Vec<u32>, _>(mut data) => {
+                                let name = name.to_string();
+                                if let Some(arr) = self.bindings.user_data.host.get_mut(&name) {
+                                    arr.append(&mut data);
+                                } else {
+                                    self.bindings.user_data.host.insert(name, data);
+                                }
+                            }
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        }
+                    }
+                    */
+                    ["#workgroup_count", name, x, y, z] => {
+                        self.workgroup_count.insert(
+                            name.to_string(),
+                            [parse_u32(x, n)?, parse_u32(y, n)?, parse_u32(z, n)?],
+                        );
+                    }
+                    ["#dispatch_count", name, x] => {
+                        self.dispatch_count
+                            .insert(name.to_string(), parse_u32(x, n)?);
+                    }
+                    ["#define", l, r] => {
+                        self.defines.insert(l.to_string(), r.to_string());
+                    }
+                    ["#storage", name, ty] => {
+                        if storage_count >= 2 {
+                            return Err(WGSLError {
+                                summary: "Only two storage buffers are currently supported"
+                                    .to_string(),
+                                line: n,
+                            });
+                        }
+                        source.push_line(&format!("@group(0) @binding({storage_count}) var<storage,read_write> {name}: {ty};"), n);
+                        storage_count += 1;
+                    }
                     _ => {
-                        self.on_error_cb
-                            .call("Unrecognised preprocessor directive", n, 1);
-                        return None;
+                        let summary = "Unrecognised preprocessor directive".to_string();
+                        return Err(WGSLError { summary, line: n });
                     }
                 }
             } else {
-                push_line(n, line);
+                source.push_line(line, n);
             }
         }
-        Some((wgsl, sourcemap))
+        Ok(source)
     }
 
     pub fn set_shader(&mut self, shader: &str) {
+        match self.preprocess(shader) {
+            Err(e) => wgsl_error_handler(&e.summary, e.line, 0),
+            Ok(source) => self.compile(source),
+        }
+    }
+
+    fn compile(&mut self, source: SourceMap) {
         let now = instant::Instant::now();
-        if let Some((source, sourcemap)) = self.preprocess(shader) {
-            let prelude = self.prelude(); // prelude must be generated after preprocessor has run
+        let prelude = self.prelude(); // prelude must be generated after preprocessor has run
 
-            // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
-            let prelude_len = count_newlines(&prelude);
-            let re_parser = lazy_regex::regex!(r"(?s):(\d+):(\d+) (.*)");
-            let re_invalid = lazy_regex::regex!(r"\[Invalid \w+\] is invalid.");
-            let on_error_cb = self.on_error_cb.clone();
-            let sourcemap_clone = sourcemap.clone();
-            self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
-                let err = &e.to_string();
-                if re_invalid.is_match(err) {
-                    return;
+        // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
+        let prelude_len = count_newlines(&prelude);
+        let re_parser = regex!(r"(?s):(\d+):(\d+) (.*)");
+        let re_invalid = regex!(r"\[Invalid \w+\] is invalid.");
+        let sourcemap_clone = source.map.clone();
+        self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
+            let err = &e.to_string();
+            if re_invalid.is_match(err) {
+                return;
+            }
+            match re_parser.captures(err) {
+                None => {
+                    log::error!("{e}");
+                    wgsl_error_handler(err, 0, 0);
                 }
-                match re_parser.captures(err) {
-                    None => {
-                        log::error!("{e}");
-                        on_error_cb.call(err, 0, 0);
-                    }
-                    Some(cap) => {
-                        let row = cap[1].parse().unwrap_or(prelude_len);
-                        let col = cap[2].parse().unwrap_or(0);
-                        let summary = &cap[3];
-                        let mut n = 0;
-                        if row >= prelude_len {
-                            n = row - prelude_len;
-                        }
-                        if n < sourcemap_clone.len() {
-                            n = sourcemap_clone[n];
-                        }
-                        on_error_cb.call(summary, n, col);
-                        SHADER_ERROR.store(true, Ordering::SeqCst);
-                    }
-                }
-            });
-
-            let wgsl = prelude + &source;
-            match wgsl::parse_str(&wgsl) {
-                Ok(module) => {
-                    let entry_points: Vec<_> = module
-                        .entry_points
-                        .iter()
-                        .filter(|f| f.stage == naga::ShaderStage::Compute)
-                        .collect();
-                    let entry_point_names: Vec<String> = entry_points
-                        .iter()
-                        .map(|entry_point| entry_point.name.clone())
-                        .collect();
-                    self.handle_success(entry_point_names);
-                    let compute_shader =
-                        self.wgpu
-                            .device
-                            .create_shader_module(&wgpu::ShaderModuleDescriptor {
-                                label: None,
-                                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
-                            });
-                    self.last_compute_pipelines = Some(take(&mut self.compute_pipelines));
-                    self.compute_pipelines = entry_points
-                        .iter()
-                        .map(|entry_point| ComputePipeline {
-                            name: entry_point.name.clone(),
-                            workgroup_size: entry_point.workgroup_size,
-                            thread_count: self
-                                .thread_count
-                                .get(&entry_point.name)
-                                .map(|t| t.clone()),
-                            dispatch_count: *self
-                                .dispatch_count
-                                .get(&entry_point.name)
-                                .unwrap_or(&1),
-                            pipeline: self.wgpu.device.create_compute_pipeline(
-                                &wgpu::ComputePipelineDescriptor {
-                                    label: None,
-                                    layout: Some(&self.compute_pipeline_layout),
-                                    module: &compute_shader,
-                                    entry_point: &entry_point.name,
-                                },
-                            ),
-                        })
-                        .collect();
-                    self.query_set = if !self
-                        .wgpu
-                        .device
-                        .features()
-                        .contains(wgpu::Features::TIMESTAMP_QUERY)
-                    {
-                        None
-                    } else {
-                        Some(
-                            self.wgpu
-                                .device
-                                .create_query_set(&wgpu::QuerySetDescriptor {
-                                    label: None,
-                                    count: 2 * self.compute_pipelines.len() as u32,
-                                    ty: wgpu::QueryType::Timestamp,
-                                }),
-                        )
-                    };
-                    log::info!(
-                        "Shader compiled in {}s",
-                        now.elapsed().as_micros() as f32 * 1e-6
-                    );
-                }
-                Err(e) => {
-                    log::error!("Error parsing WGSL: {e}");
-                    let (row, col) = e.location(&wgsl);
-                    let summary = e.emit_to_string(&wgsl);
+                Some(cap) => {
+                    let row = cap[1].parse().unwrap_or(prelude_len);
+                    let col = cap[2].parse().unwrap_or(0);
+                    let summary = &cap[3];
                     let mut n = 0;
                     if row >= prelude_len {
                         n = row - prelude_len;
                     }
-                    if n < sourcemap.len() {
-                        n = sourcemap[n];
+                    if n < sourcemap_clone.len() {
+                        n = sourcemap_clone[n];
                     }
-                    self.on_error_cb.call(&summary, n, col);
+                    wgsl_error_handler(summary, n, col);
+                    SHADER_ERROR.store(true, Ordering::SeqCst);
                 }
+            }
+        });
+
+        let wgsl = self.subst_defines(&(prelude + &source.source));
+        match wgsl::parse_str(&wgsl) {
+            Ok(module) => {
+                let entry_points: Vec<_> = module
+                    .entry_points
+                    .iter()
+                    .filter(|f| f.stage == naga::ShaderStage::Compute)
+                    .collect();
+                let entry_point_names: Vec<String> = entry_points
+                    .iter()
+                    .map(|entry_point| entry_point.name.clone())
+                    .collect();
+                self.handle_success(entry_point_names);
+                let compute_shader =
+                    self.wgpu
+                        .device
+                        .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                            label: None,
+                            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
+                        });
+                self.last_compute_pipelines = Some(take(&mut self.compute_pipelines));
+                self.compute_pipelines = entry_points
+                    .iter()
+                    .map(|entry_point| ComputePipeline {
+                        name: entry_point.name.clone(),
+                        workgroup_size: entry_point.workgroup_size,
+                        workgroup_count: self
+                            .workgroup_count
+                            .get(&entry_point.name)
+                            .map(|t| t.clone()),
+                        dispatch_count: *self.dispatch_count.get(&entry_point.name).unwrap_or(&1),
+                        pipeline: self.wgpu.device.create_compute_pipeline(
+                            &wgpu::ComputePipelineDescriptor {
+                                label: None,
+                                layout: Some(&self.compute_pipeline_layout),
+                                module: &compute_shader,
+                                entry_point: &entry_point.name,
+                            },
+                        ),
+                    })
+                    .collect();
+                self.query_set = if !self
+                    .wgpu
+                    .device
+                    .features()
+                    .contains(wgpu::Features::TIMESTAMP_QUERY)
+                {
+                    None
+                } else {
+                    Some(
+                        self.wgpu
+                            .device
+                            .create_query_set(&wgpu::QuerySetDescriptor {
+                                label: None,
+                                count: 2 * self.compute_pipelines.len() as u32,
+                                ty: wgpu::QueryType::Timestamp,
+                            }),
+                    )
+                };
+                log::info!(
+                    "Shader compiled in {}s",
+                    now.elapsed().as_micros() as f32 * 1e-6
+                );
+            }
+            Err(e) => {
+                log::error!("Error parsing WGSL: {e}");
+                let (row, col) = e.location(&wgsl);
+                let summary = e.emit_to_string(&wgsl);
+                let mut n = 0;
+                if row >= prelude_len {
+                    n = row - prelude_len;
+                }
+                if n < source.map.len() {
+                    n = source.map[n];
+                }
+                wgsl_error_handler(&summary, n, col);
             }
         }
     }
@@ -598,10 +688,6 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
             self.wgpu.surface_format,
             wgpu::FilterMode::Linear,
         );
-    }
-
-    pub fn on_error(&mut self, callback: js_sys::Function) {
-        self.on_error_cb = ErrorCallback(Some(callback));
     }
 
     pub fn on_success(&mut self, callback: js_sys::Function) {
