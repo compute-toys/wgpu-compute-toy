@@ -441,6 +441,9 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
                                 "nikat/noise_simplex_3d" => Some(include_str!(
                                     "../site/public/include/nikat/noise_simplex_3d.wgsl"
                                 )),
+                                "davidar/scan" => Some(include_str!(
+                                    "../site/public/include/davidar/scan.wgsl"
+                                )),
                                 _ => None,
                             },
                         };
