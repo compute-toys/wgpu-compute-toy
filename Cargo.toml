@@ -26,11 +26,13 @@ lazy_static = "1.4.0"
 bitvec = "1.0.0"
 lazy-regex = "2.3.0"
 itertools = "0.10.3"
+cached = "0.34.1"
 
 console_log = "0.2"
 js-sys = "0.3.50"
 wasm-bindgen-futures = "0.4.23"
 web-sys = "0.3.22"
+gloo-net = "0.2.0"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

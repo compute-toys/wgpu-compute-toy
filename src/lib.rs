@@ -1,46 +1,19 @@
 mod bind;
 mod blit;
 pub mod context;
+mod pp;
 mod utils;
 
 use context::{init_wgpu, WgpuContext};
 use lazy_regex::regex;
 use naga::front::wgsl;
 use num::Integer;
+use pp::{SourceMap, WGSLError};
 use std::collections::HashMap;
+use std::future::Future;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
-use utils::parse_u32;
 use wasm_bindgen::prelude::*;
-
-#[wasm_bindgen]
-extern "C" {
-    fn wgsl_error_handler(summary: &str, row: usize, col: usize);
-}
-
-pub struct WGSLError {
-    summary: String,
-    line: usize,
-}
-
-struct SourceMap {
-    source: String,
-    map: Vec<usize>,
-}
-
-impl SourceMap {
-    fn new() -> Self {
-        Self {
-            source: String::new(),
-            map: vec![0],
-        }
-    }
-    fn push_line(&mut self, s: &str, n: usize) {
-        self.source.push_str(s);
-        self.source.push('\n');
-        self.map.push(n);
-    }
-}
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -88,9 +61,6 @@ pub struct WgpuToyRenderer {
     pub wgpu: WgpuContext,
     screen_width: u32,
     screen_height: u32,
-    workgroup_count: HashMap<String, [u32; 3]>,
-    dispatch_count: HashMap<String, u32>,
-    defines: HashMap<String, String>,
     bindings: bind::Bindings,
     compute_pipeline_layout: wgpu::PipelineLayout,
     last_compute_pipelines: Option<Vec<ComputePipeline>>,
@@ -103,6 +73,9 @@ pub struct WgpuToyRenderer {
     query_set: Option<wgpu::QuerySet>,
     last_stats: instant::Instant,
 }
+
+const STATS_PERIOD: u32 = 100;
+const ASSERTS_SIZE: usize = bind::NUM_ASSERT_COUNTERS * size_of::<u32>();
 
 static SHADER_ERROR: AtomicBool = AtomicBool::new(false);
 
@@ -145,9 +118,6 @@ impl WgpuToyRenderer {
             wgpu,
             bindings,
             on_success_cb: SuccessCallback(None),
-            workgroup_count: HashMap::new(),
-            dispatch_count: HashMap::new(),
-            defines: HashMap::new(),
             pass_f32: false,
             query_set: None,
             last_stats: instant::Instant::now(),
@@ -160,16 +130,22 @@ impl WgpuToyRenderer {
     pub fn render(&mut self) {
         match self.wgpu.surface.get_current_texture() {
             Err(e) => log::error!("Unable to get framebuffer: {e}"),
-            Ok(f) => self.render_to(f),
+            Ok(f) => {
+                let staging_buffer = self.render_to(f);
+                wasm_bindgen_futures::spawn_local(self.staging_belt.recall());
+                wasm_bindgen_futures::spawn_local(Self::postrender(
+                    staging_buffer,
+                    self.screen_width * self.screen_height,
+                ));
+            }
         }
     }
 
-    fn render_to(&mut self, frame: wgpu::SurfaceTexture) {
-        let stats_period = 100;
+    fn render_to(&mut self, frame: wgpu::SurfaceTexture) -> Option<wgpu::Buffer> {
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
         self.bindings
             .stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder);
-        if self.bindings.time.host.frame % stats_period == 0 {
+        if self.bindings.time.host.frame % STATS_PERIOD == 0 {
             //encoder.clear_buffer(&self.uniforms.debug_buffer, 0, None); // not yet implemented in web backend
             self.staging_belt
                 .write_buffer(
@@ -183,7 +159,7 @@ impl WgpuToyRenderer {
                 .copy_from_slice(&bytemuck::bytes_of(&[0u32; bind::NUM_ASSERT_COUNTERS]));
 
             if self.bindings.time.host.frame > 0 {
-                let mean = self.last_stats.elapsed().as_secs_f32() / stats_period as f32;
+                let mean = self.last_stats.elapsed().as_secs_f32() / STATS_PERIOD as f32;
                 self.last_stats = instant::Instant::now();
                 log::info!("{} fps ({} ms)", 1. / mean, 1e3 * mean);
             }
@@ -248,12 +224,11 @@ impl WgpuToyRenderer {
             }
         }
         let mut staging_buffer = None;
-        let query_offset = bind::NUM_ASSERT_COUNTERS * size_of::<u32>();
         let query_count = 2 * self.compute_pipelines.len();
-        if self.bindings.time.host.frame % stats_period == stats_period - 1 {
+        if self.bindings.time.host.frame % STATS_PERIOD == STATS_PERIOD - 1 {
             let buf = self.wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
-                size: (query_offset + query_count * size_of::<u64>()) as wgpu::BufferAddress,
+                size: (ASSERTS_SIZE + query_count * size_of::<u64>()) as wgpu::BufferAddress,
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -262,14 +237,14 @@ impl WgpuToyRenderer {
                 0,
                 &buf,
                 0,
-                query_offset as wgpu::BufferAddress,
+                ASSERTS_SIZE as wgpu::BufferAddress,
             );
             if let Some(q) = &self.query_set {
                 encoder.resolve_query_set(
                     q,
                     0..query_count as u32,
                     &buf,
-                    query_offset as wgpu::BufferAddress,
+                    ASSERTS_SIZE as wgpu::BufferAddress,
                 );
             }
             staging_buffer = Some(buf);
@@ -280,53 +255,36 @@ impl WgpuToyRenderer {
             &frame.texture.create_view(&Default::default()),
         );
         self.wgpu.queue.submit(Some(encoder.finish()));
-        if let Some(buf) = staging_buffer {
-            self.wgpu.device.poll(wgpu::Maintain::Wait);
-            let numthreads = self.screen_width * self.screen_height;
-            #[cfg(target_arch = "wasm32")]
-            wasm_bindgen_futures::spawn_local(async move {
+        self.wgpu.device.poll(wgpu::Maintain::Wait);
+        frame.present();
+        staging_buffer
+    }
+
+    fn postrender(
+        staging_buffer: Option<wgpu::Buffer>,
+        numthreads: u32,
+    ) -> impl Future<Output = ()> + 'static {
+        async move {
+            if let Some(buf) = staging_buffer {
                 let buffer_slice = buf.slice(..);
                 match buffer_slice.map_async(wgpu::MapMode::Read).await {
                     Err(e) => log::error!("{e}"),
                     Ok(()) => {
                         let data = buffer_slice.get_mapped_range();
-                        let assertions: &[u32] = bytemuck::cast_slice(&data[0..query_offset]);
-                        let timestamps: &[u64] = bytemuck::cast_slice(&data[query_offset..]);
+                        let assertions: &[u32] = bytemuck::cast_slice(&data[0..ASSERTS_SIZE]);
+                        let timestamps: &[u64] = bytemuck::cast_slice(&data[ASSERTS_SIZE..]);
                         for (i, count) in assertions.iter().enumerate() {
                             if count > &0 {
                                 let percent =
-                                    *count as f32 / (numthreads * stats_period) as f32 * 100.0;
+                                    *count as f32 / (numthreads * STATS_PERIOD) as f32 * 100.0;
                                 log::warn!("Assertion {i} failed in {percent}% of threads");
                             }
                         }
                     }
                 }
                 buf.unmap();
-            });
+            }
         }
-        #[cfg(target_arch = "wasm32")]
-        wasm_bindgen_futures::spawn_local(self.staging_belt.recall());
-        frame.present();
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let executor = async_executor::LocalExecutor::new();
-            executor.spawn(self.staging_belt.recall()).detach();
-            executor.try_tick();
-        }
-    }
-
-    fn subst_defines(&self, source: &str) -> String {
-        regex!("[[:word:]]+")
-            .replace_all(source, |caps: &regex::Captures| match &caps[0] {
-                "SCREEN_WIDTH" => self.screen_width.to_string(),
-                "SCREEN_HEIGHT" => self.screen_height.to_string(),
-                name => self
-                    .defines
-                    .get(name)
-                    .unwrap_or(&name.to_string())
-                    .to_owned(),
-            })
-            .to_string()
     }
 
     pub fn prelude(&self) -> String {
@@ -412,116 +370,16 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
         self.on_success_cb.call(entry_points);
     }
 
-    fn preprocess(&mut self, shader: &str) -> Result<SourceMap, WGSLError> {
-        self.bindings.user_data.host = HashMap::from([("_dummy".into(), vec![0])]); // clear
-        self.workgroup_count.clear();
-        self.defines.clear();
-        let mut source = SourceMap::new();
-        let mut storage_count = 0;
-        for (line, n) in shader.lines().zip(1..) {
-            if line.chars().nth(0) == Some('#') {
-                let line = self.subst_defines(line);
-                let tokens: Vec<&str> = line.split(" ").collect();
-                match tokens[..] {
-                    ["#include", name] => {
-                        let include = match regex!(r#""(.*)""#).captures(name) {
-                            None => {
-                                return Err(WGSLError {
-                                    summary: "Path must be enclosed in quotes".to_string(),
-                                    line: n,
-                                })
-                            }
-                            Some(cap) => match &cap[1] {
-                                "Dave_Hoskins/hash" => Some(include_str!(
-                                    "../site/public/include/Dave_Hoskins/hash.wgsl"
-                                )),
-                                "iq/noise_simplex_2d" => Some(include_str!(
-                                    "../site/public/include/iq/noise_simplex_2d.wgsl"
-                                )),
-                                "nikat/noise_simplex_3d" => Some(include_str!(
-                                    "../site/public/include/nikat/noise_simplex_3d.wgsl"
-                                )),
-                                "davidar/scan" => Some(include_str!(
-                                    "../site/public/include/davidar/scan.wgsl"
-                                )),
-                                _ => None,
-                            },
-                        };
-                        if let Some(code) = include {
-                            for line in code.lines() {
-                                source.push_line(line, n);
-                            }
-                        } else {
-                            let summary = format!("Cannot find include {name}");
-                            return Err(WGSLError { summary, line: n });
-                        }
-                    }
-                    /*
-                    ["#data", name, "u32", ..] => {
-                        match tokens[3..]
-                            .join("")
-                            .split(",")
-                            .map(|s| utils::parse_u32(s, n))
-                            .collect()
-                        {
-                            Ok::<Vec<u32>, _>(mut data) => {
-                                let name = name.to_string();
-                                if let Some(arr) = self.bindings.user_data.host.get_mut(&name) {
-                                    arr.append(&mut data);
-                                } else {
-                                    self.bindings.user_data.host.insert(name, data);
-                                }
-                            }
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        }
-                    }
-                    */
-                    ["#workgroup_count", name, x, y, z] => {
-                        self.workgroup_count.insert(
-                            name.to_string(),
-                            [parse_u32(x, n)?, parse_u32(y, n)?, parse_u32(z, n)?],
-                        );
-                    }
-                    ["#dispatch_count", name, x] => {
-                        self.dispatch_count
-                            .insert(name.to_string(), parse_u32(x, n)?);
-                    }
-                    ["#define", l, r] => {
-                        self.defines.insert(l.to_string(), r.to_string());
-                    }
-                    ["#storage", name, ty] => {
-                        if storage_count >= 2 {
-                            return Err(WGSLError {
-                                summary: "Only two storage buffers are currently supported"
-                                    .to_string(),
-                                line: n,
-                            });
-                        }
-                        source.push_line(&format!("@group(0) @binding({storage_count}) var<storage,read_write> {name}: {ty};"), n);
-                        storage_count += 1;
-                    }
-                    _ => {
-                        let summary = "Unrecognised preprocessor directive".to_string();
-                        return Err(WGSLError { summary, line: n });
-                    }
-                }
-            } else {
-                source.push_line(line, n);
-            }
-        }
-        Ok(source)
+    pub fn preprocess(&self, shader: &str) -> js_sys::Promise {
+        let shader = shader.to_owned();
+        let defines = HashMap::from([
+            ("SCREEN_WIDTH".to_owned(), self.screen_width.to_string()),
+            ("SCREEN_HEIGHT".to_owned(), self.screen_height.to_string()),
+        ]);
+        utils::promise(async move { pp::Preprocessor::new(defines).run(&shader).await })
     }
 
-    pub fn set_shader(&mut self, shader: &str) {
-        match self.preprocess(shader) {
-            Err(e) => wgsl_error_handler(&e.summary, e.line, 0),
-            Ok(source) => self.compile(source),
-        }
-    }
-
-    fn compile(&mut self, source: SourceMap) {
+    pub fn compile(&mut self, source: SourceMap) {
         let now = instant::Instant::now();
         let prelude = self.prelude(); // prelude must be generated after preprocessor has run
 
@@ -538,7 +396,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
             match re_parser.captures(err) {
                 None => {
                     log::error!("{e}");
-                    wgsl_error_handler(err, 0, 0);
+                    WGSLError::handler(err, 0, 0);
                 }
                 Some(cap) => {
                     let row = cap[1].parse().unwrap_or(prelude_len);
@@ -551,13 +409,13 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
                     if n < sourcemap_clone.len() {
                         n = sourcemap_clone[n];
                     }
-                    wgsl_error_handler(summary, n, col);
+                    WGSLError::handler(summary, n, col);
                     SHADER_ERROR.store(true, Ordering::SeqCst);
                 }
             }
         });
 
-        let wgsl = self.subst_defines(&(prelude + &source.source));
+        let wgsl = &(prelude + &source.source);
         match wgsl::parse_str(&wgsl) {
             Ok(module) => {
                 let entry_points: Vec<_> = module
@@ -583,11 +441,11 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
                     .map(|entry_point| ComputePipeline {
                         name: entry_point.name.clone(),
                         workgroup_size: entry_point.workgroup_size,
-                        workgroup_count: self
+                        workgroup_count: source
                             .workgroup_count
                             .get(&entry_point.name)
                             .map(|t| t.clone()),
-                        dispatch_count: *self.dispatch_count.get(&entry_point.name).unwrap_or(&1),
+                        dispatch_count: *source.dispatch_count.get(&entry_point.name).unwrap_or(&1),
                         pipeline: self.wgpu.device.create_compute_pipeline(
                             &wgpu::ComputePipelineDescriptor {
                                 label: None,
@@ -632,7 +490,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
                 if n < source.map.len() {
                     n = source.map[n];
                 }
-                wgsl_error_handler(&summary, n, col);
+                WGSLError::handler(&summary, n, col);
             }
         }
     }
@@ -729,10 +587,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
                 self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu);
             }
         }
-        log::info!(
-            "Channel {index} loaded in {}s",
-            now.elapsed().as_micros() as f32 * 1e-6
-        );
+        log::info!("Channel {index} loaded in {}s", now.elapsed().as_secs_f32());
     }
 
     pub fn load_channel_hdr(&mut self, index: usize, bytes: &[u8]) -> Result<(), String> {
@@ -767,10 +622,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
             ),
         );
         self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu);
-        log::info!(
-            "Channel {index} loaded in {}s",
-            now.elapsed().as_micros() as f32 * 1e-6
-        );
+        log::info!("Channel {index} loaded in {}s", now.elapsed().as_secs_f32());
         Ok(())
     }
 }
