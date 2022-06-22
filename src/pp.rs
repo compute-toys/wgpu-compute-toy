@@ -81,16 +81,19 @@ impl Preprocessor {
     }
 
     async fn preprocess(&mut self, shader: &str) -> Result<SourceMap, WGSLError> {
+        let re_comment = regex!("//.*");
+        let re_quotes = regex!(r#""(.*)""#);
         let mut source = SourceMap::new();
         let mut storage_count = 0;
         let mut assert_count = 0;
         for (line, n) in shader.lines().zip(1..) {
             let line = self.subst_defines(line);
             if line.trim().chars().nth(0) == Some('#') {
+                let line = re_comment.replace(&line, "");
                 let tokens: Vec<&str> = line.trim().split(" ").collect();
                 match tokens[..] {
                     ["#include", name] => {
-                        let include = match regex!(r#""(.*)""#).captures(name) {
+                        let include = match re_quotes.captures(name) {
                             None => {
                                 return Err(WGSLError::new(
                                     "Path must be enclosed in quotes".to_string(),
