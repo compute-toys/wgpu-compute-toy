@@ -1,4 +1,7 @@
-use crate::utils::{fetch_include, parse_u32};
+use crate::{
+    bind::NUM_ASSERT_COUNTERS,
+    utils::{fetch_include, parse_u32},
+};
 use lazy_regex::regex;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -35,15 +38,18 @@ pub struct SourceMap {
     pub workgroup_count: HashMap<String, [u32; 3]>,
     #[wasm_bindgen(skip)]
     pub dispatch_count: HashMap<String, u32>,
+    #[wasm_bindgen(skip)]
+    pub assert_map: Vec<usize>,
 }
 
 impl SourceMap {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             source: String::new(),
             map: vec![0],
             workgroup_count: HashMap::new(),
             dispatch_count: HashMap::new(),
+            assert_map: vec![],
         }
     }
     fn push_line(&mut self, s: &str, n: usize) {
@@ -77,10 +83,11 @@ impl Preprocessor {
     async fn preprocess(&mut self, shader: &str) -> Result<SourceMap, WGSLError> {
         let mut source = SourceMap::new();
         let mut storage_count = 0;
+        let mut assert_count = 0;
         for (line, n) in shader.lines().zip(1..) {
             let line = self.subst_defines(line);
-            if line.chars().nth(0) == Some('#') {
-                let tokens: Vec<&str> = line.split(" ").collect();
+            if line.trim().chars().nth(0) == Some('#') {
+                let tokens: Vec<&str> = line.trim().split(" ").collect();
                 match tokens[..] {
                     ["#include", name] => {
                         let include = match regex!(r#""(.*)""#).captures(name) {
@@ -124,6 +131,18 @@ impl Preprocessor {
                         }
                         source.push_line(&format!("@group(0) @binding({storage_count}) var<storage,read_write> {name}: {ty};"), n);
                         storage_count += 1;
+                    }
+                    ["#assert", ..] => {
+                        if assert_count >= NUM_ASSERT_COUNTERS {
+                            return Err(WGSLError::new(
+                                format!("A maximum of {NUM_ASSERT_COUNTERS} assertions are currently supported"),
+                                n,
+                            ));
+                        }
+                        let pred = tokens[1..].join(" ");
+                        source.push_line(&format!("assert({assert_count}, {pred});"), n);
+                        source.assert_map.push(n);
+                        assert_count += 1;
                     }
                     _ => {
                         return Err(WGSLError::new(

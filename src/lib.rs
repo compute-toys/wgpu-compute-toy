@@ -72,6 +72,7 @@ pub struct WgpuToyRenderer {
     screen_blitter: blit::Blitter,
     query_set: Option<wgpu::QuerySet>,
     last_stats: instant::Instant,
+    source: SourceMap,
 }
 
 const STATS_PERIOD: u32 = 100;
@@ -121,6 +122,7 @@ impl WgpuToyRenderer {
             pass_f32: false,
             query_set: None,
             last_stats: instant::Instant::now(),
+            source: SourceMap::new(),
         }
     }
 }
@@ -136,6 +138,7 @@ impl WgpuToyRenderer {
                 wasm_bindgen_futures::spawn_local(Self::postrender(
                     staging_buffer,
                     self.screen_width * self.screen_height,
+                    self.source.assert_map.clone(),
                 ));
             }
         }
@@ -263,6 +266,7 @@ impl WgpuToyRenderer {
     fn postrender(
         staging_buffer: Option<wgpu::Buffer>,
         numthreads: u32,
+        assert_map: Vec<usize>,
     ) -> impl Future<Output = ()> + 'static {
         async move {
             if let Some(buf) = staging_buffer {
@@ -278,6 +282,13 @@ impl WgpuToyRenderer {
                                 let percent =
                                     *count as f32 / (numthreads * STATS_PERIOD) as f32 * 100.0;
                                 log::warn!("Assertion {i} failed in {percent}% of threads");
+                                if i < assert_map.len() {
+                                    WGSLError::handler(
+                                        &format!("Assertion failed in {percent}% of threads"),
+                                        assert_map[i],
+                                        0,
+                                    );
+                                }
                             }
                         }
                     }
@@ -478,6 +489,7 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
                     "Shader compiled in {}s",
                     now.elapsed().as_micros() as f32 * 1e-6
                 );
+                self.source = source;
             }
             Err(e) => {
                 log::error!("Error parsing WGSL: {e}");
