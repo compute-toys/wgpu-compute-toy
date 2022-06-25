@@ -69,9 +69,7 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
         .request_device(&Default::default(), None)
         .await
         .map_err(|e| e.to_string())?;
-    let surface_format = surface
-        .get_preferred_format(&adapter)
-        .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+    let surface_format = surface.get_supported_formats(&adapter)[0];
     surface.configure(
         &device,
         &wgpu::SurfaceConfiguration {

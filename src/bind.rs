@@ -48,18 +48,11 @@ impl<H> BufferBinding<H> {
     pub fn buffer(&self) -> &wgpu::Buffer {
         &self.device
     }
-    fn stage(
-        &self,
-        staging_belt: &mut wgpu::util::StagingBelt,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-    ) {
+    fn stage(&self, queue: &wgpu::Queue) {
         let data = (self.serialise)(&self.host);
         match wgpu::BufferSize::new(data.len() as u64) {
             None => log::warn!("no data to stage"),
-            Some(size) => staging_belt
-                .write_buffer(encoder, &self.device, 0, size, device)
-                .copy_from_slice(&data),
+            Some(size) => queue.write_buffer(&self.device, 0, &data),
         }
     }
 }
@@ -599,16 +592,11 @@ impl Bindings {
             .collect()
     }
 
-    pub fn stage(
-        &self,
-        staging_belt: &mut wgpu::util::StagingBelt,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-    ) {
-        self.custom.stage(staging_belt, device, encoder);
-        self.user_data.stage(staging_belt, device, encoder);
-        self.time.stage(staging_belt, device, encoder);
-        self.mouse.stage(staging_belt, device, encoder);
-        self.keys.stage(staging_belt, device, encoder);
+    pub fn stage(&self, queue: &wgpu::Queue) {
+        self.custom.stage(queue);
+        self.user_data.stage(queue);
+        self.time.stage(queue);
+        self.mouse.stage(queue);
+        self.keys.stage(queue);
     }
 }

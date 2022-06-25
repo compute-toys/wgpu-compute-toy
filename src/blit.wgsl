@@ -5,7 +5,7 @@ struct VertexOutput {
     @location(0) tex_coords: vec2<f32>
 };
 
-@stage(vertex)
+@vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
     let x = i32(vertex_index) / 2;
@@ -40,18 +40,18 @@ fn linear_to_srgb(rgb: vec3<f32>) -> vec3<f32> {
         rgb <= vec3<f32>(0.0031308));
 }
 
-@stage(fragment)
+@fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(r_color, r_sampler, in.tex_coords);
 }
 
-@stage(fragment)
+@fragment
 fn fs_main_linear_to_srgb(in: VertexOutput) -> @location(0) vec4<f32> {
     let rgba = textureSample(r_color, r_sampler, in.tex_coords);
     return vec4<f32>(linear_to_srgb(rgba.rgb), rgba.a);
 }
 
-@stage(fragment)
+@fragment
 fn fs_main_rgbe_to_linear(in: VertexOutput) -> @location(0) vec4<f32> {
     let rgbe = textureSample(r_color, r_sampler, in.tex_coords);
     return vec4<f32>(rgbe.rgb * exp2(rgbe.a * 255. - 128.), 1.);

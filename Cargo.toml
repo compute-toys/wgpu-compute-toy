@@ -11,34 +11,35 @@ crate-type = ["cdylib", "rlib"]
 default = ["console_error_panic_hook"]
 
 [dependencies]
-wasm-bindgen = "0.2.63"
+wasm-bindgen = "0.2.81"
 
-wgpu = "0.12.0"
-winit = "0.26"
-pollster = "0.2"
-async-executor = "1.4"
-bytemuck = { version = "1.7.1", features = ["derive"] }
-log = "0.4"
+winit = "0.26.1"
+pollster = "0.2.5"
+async-executor = "1.4.1"
+bytemuck = { version = "1.9.1", features = ["derive"] }
+log = "0.4.17"
 env_logger = "0.9.0"
 num = "0.4.0"
-regex = "1"
+regex = "1.5.6"
 lazy_static = "1.4.0"
 bitvec = "1.0.0"
 lazy-regex = "2.3.0"
 itertools = "0.10.3"
 cached = "0.34.1"
+futures-intrusive = "0.4.0"
 
-console_log = "0.2"
-js-sys = "0.3.50"
-wasm-bindgen-futures = "0.4.23"
-web-sys = "0.3.22"
-gloo-net = "0.2.0"
+console_log = "0.2.0"
+js-sys = "0.3.57"
+wasm-bindgen-futures = "0.4.31"
+web-sys = "0.3.57"
+gloo-utils = "0.1.4"
+gloo-net = "0.2.1"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
-console_error_panic_hook = { version = "0.1.6", optional = true }
+console_error_panic_hook = { version = "0.1.7", optional = true }
 
 # `wee_alloc` is a tiny allocator for wasm that is only ~1K in code size
 # compared to the default allocator's ~10K. It is slower than the default
@@ -47,23 +48,28 @@ console_error_panic_hook = { version = "0.1.6", optional = true }
 # Unfortunately, `wee_alloc` requires nightly Rust when targeting wasm for now.
 wee_alloc = { version = "0.4.5", optional = true }
 
+[dependencies.wgpu]
+git = "https://github.com/davidar/wgpu"
+rev = "2fb248d"
+#version = "0.12.0"
+
 [dependencies.naga]
 git = "https://github.com/gfx-rs/naga"
-rev = "43cd0ec"
+rev = "0b60f410"
 #version = "0.8"
 features = ["wgsl-in"]
 
 [dependencies.image]
-version = "0.24"
+version = "0.24.2"
 default-features = false
 features = ["png", "jpeg", "hdr"]
 
 [dependencies.instant]
-version = "0.1"
+version = "0.1.12"
 features = ["wasm-bindgen"]
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3.13"
+wasm-bindgen-test = "0.3.31"
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.

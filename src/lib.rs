@@ -66,7 +66,6 @@ pub struct WgpuToyRenderer {
     last_compute_pipelines: Option<Vec<ComputePipeline>>,
     compute_pipelines: Vec<ComputePipeline>,
     compute_bind_group: wgpu::BindGroup,
-    staging_belt: wgpu::util::StagingBelt,
     on_success_cb: SuccessCallback,
     pass_f32: bool,
     screen_blitter: blit::Blitter,
@@ -107,7 +106,6 @@ impl WgpuToyRenderer {
             compute_pipelines: vec![],
             screen_width: size.width,
             screen_height: size.height,
-            staging_belt: wgpu::util::StagingBelt::new(4096),
             screen_blitter: blit::Blitter::new(
                 &wgpu,
                 &bindings.tex_screen.view(),
@@ -132,7 +130,6 @@ impl WgpuToyRenderer {
             Err(e) => log::error!("Unable to get framebuffer: {e}"),
             Ok(f) => {
                 let staging_buffer = self.render_to(f);
-                wasm_bindgen_futures::spawn_local(self.staging_belt.recall());
                 wasm_bindgen_futures::spawn_local(Self::postrender(
                     staging_buffer,
                     self.screen_width * self.screen_height,
@@ -143,20 +140,14 @@ impl WgpuToyRenderer {
 
     fn render_to(&mut self, frame: wgpu::SurfaceTexture) -> Option<wgpu::Buffer> {
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
-        self.bindings
-            .stage(&mut self.staging_belt, &self.wgpu.device, &mut encoder);
+        self.bindings.stage(&self.wgpu.queue);
         if self.bindings.time.host.frame % STATS_PERIOD == 0 {
             //encoder.clear_buffer(&self.uniforms.debug_buffer, 0, None); // not yet implemented in web backend
-            self.staging_belt
-                .write_buffer(
-                    &mut encoder,
-                    &self.bindings.debug_buffer.buffer(),
-                    0,
-                    wgpu::BufferSize::new(size_of::<[u32; bind::NUM_ASSERT_COUNTERS]>() as u64)
-                        .unwrap(),
-                    &self.wgpu.device,
-                )
-                .copy_from_slice(&bytemuck::bytes_of(&[0u32; bind::NUM_ASSERT_COUNTERS]));
+            self.wgpu.queue.write_buffer(
+                &self.bindings.debug_buffer.buffer(),
+                0,
+                bytemuck::bytes_of(&[0u32; bind::NUM_ASSERT_COUNTERS]),
+            );
 
             if self.bindings.time.host.frame > 0 {
                 let mean = self.last_stats.elapsed().as_secs_f32() / STATS_PERIOD as f32;
@@ -164,7 +155,6 @@ impl WgpuToyRenderer {
                 log::info!("{} fps ({} ms)", 1. / mean, 1e3 * mean);
             }
         }
-        self.staging_belt.finish();
         if SHADER_ERROR.swap(false, Ordering::SeqCst) {
             match take(&mut self.last_compute_pipelines) {
                 None => log::warn!("unable to rollback shader after error"),
@@ -197,7 +187,11 @@ impl WgpuToyRenderer {
                     &[bind::OFFSET_ALIGNMENT as u32 * dispatch_counter as u32],
                 );
                 dispatch_counter += 1;
-                compute_pass.dispatch(workgroup_count[0], workgroup_count[1], workgroup_count[2]);
+                compute_pass.dispatch_workgroups(
+                    workgroup_count[0],
+                    workgroup_count[1],
+                    workgroup_count[2],
+                );
                 if let Some(q) = &self.query_set {
                     compute_pass.write_timestamp(q, 2 * pass_index as u32 + 1);
                 }
@@ -267,9 +261,12 @@ impl WgpuToyRenderer {
         async move {
             if let Some(buf) = staging_buffer {
                 let buffer_slice = buf.slice(..);
-                match buffer_slice.map_async(wgpu::MapMode::Read).await {
-                    Err(e) => log::error!("{e}"),
-                    Ok(()) => {
+                let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+                buffer_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
+                match receiver.receive().await {
+                    None => log::error!("Channel closed unexpectedly"),
+                    Some(Err(e)) => log::error!("{e}"),
+                    Some(Ok(())) => {
                         let data = buffer_slice.get_mapped_range();
                         let assertions: &[u32] = bytemuck::cast_slice(&data[0..ASSERTS_SIZE]);
                         let timestamps: &[u64] = bytemuck::cast_slice(&data[ASSERTS_SIZE..]);
@@ -329,15 +326,15 @@ fn assert(index: int, success: bool) {
     }
 }
 
-fn passStore(pass: int, coord: int2, value: float4) {
-    textureStore(pass_out, coord, pass, value);
+fn passStore(pass_index: int, coord: int2, value: float4) {
+    textureStore(pass_out, coord, pass_index, value);
 }
 
-fn passLoad(pass: int, coord: int2, lod: int) -> float4 {
-    return textureLoad(pass_in, coord, pass, lod);
+fn passLoad(pass_index: int, coord: int2, lod: int) -> float4 {
+    return textureLoad(pass_in, coord, pass_index, lod);
 }
 
-fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"#,
+fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> float4 {"#,
         );
         if self.pass_f32 {
             // https://iquilezles.org/articles/hwinterpolation/
@@ -347,17 +344,17 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
     let st = uv * res - 0.5;
     let iuv = floor(st);
     let fuv = fract(st);
-    let a = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,0.5)) / res), pass, lod);
-    let b = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,0.5)) / res), pass, lod);
-    let c = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,1.5)) / res), pass, lod);
-    let d = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,1.5)) / res), pass, lod);
+    let a = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,0.5)) / res), pass_index, lod);
+    let b = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,0.5)) / res), pass_index, lod);
+    let c = textureSampleLevel(pass_in, nearest, fract((iuv + float2(0.5,1.5)) / res), pass_index, lod);
+    let d = textureSampleLevel(pass_in, nearest, fract((iuv + float2(1.5,1.5)) / res), pass_index, lod);
     return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
 "#,
             );
         } else {
             s.push_str(
                 r#"
-    return textureSampleLevel(pass_in, bilinear, fract(uv), pass, lod);
+    return textureSampleLevel(pass_in, bilinear, fract(uv), pass_index, lod);
 "#,
             );
         }
@@ -481,16 +478,19 @@ fn passSampleLevelBilinearRepeat(pass: int, uv: float2, lod: float) -> float4 {"
             }
             Err(e) => {
                 log::error!("Error parsing WGSL: {e}");
-                let (row, col) = e.location(&wgsl);
-                let summary = e.emit_to_string(&wgsl);
-                let mut n = 0;
-                if row >= prelude_len {
-                    n = row - prelude_len;
+                if let Some(loc) = e.location(&wgsl) {
+                    let row = loc.line_number as usize;
+                    let col = loc.line_position as usize;
+                    let summary = e.emit_to_string(&wgsl);
+                    let mut n = 0;
+                    if row >= prelude_len {
+                        n = row - prelude_len;
+                    }
+                    if n < source.map.len() {
+                        n = source.map[n];
+                    }
+                    WGSLError::handler(&summary, n, col);
                 }
-                if n < source.map.len() {
-                    n = source.map[n];
-                }
-                WGSLError::handler(&summary, n, col);
             }
         }
     }
