@@ -27,6 +27,7 @@ lazy-regex = "2.3.0"
 itertools = "0.10.3"
 cached = "0.34.1"
 futures-intrusive = "0.4.0"
+async-recursion = "1.0.0"
 
 console_log = "0.2.0"
 js-sys = "0.3.57"
