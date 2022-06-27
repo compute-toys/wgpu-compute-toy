@@ -83,6 +83,7 @@ impl Preprocessor {
     async fn preprocess(&mut self, shader: &str) -> Result<SourceMap, WGSLError> {
         let re_comment = regex!("//.*");
         let re_quotes = regex!(r#""(.*)""#);
+        let re_chevrons = regex!("<(.*)>");
         let mut source = SourceMap::new();
         let mut storage_count = 0;
         let mut assert_count = 0;
@@ -94,12 +95,18 @@ impl Preprocessor {
                 match tokens[..] {
                     ["#include", name] => {
                         let include = match re_quotes.captures(name) {
-                            None => {
-                                return Err(WGSLError::new(
-                                    "Path must be enclosed in quotes".to_string(),
-                                    n,
-                                ))
-                            }
+                            None => match re_chevrons.captures(name) {
+                                None => {
+                                    return Err(WGSLError::new(
+                                        "Path must be enclosed in quotes".to_string(),
+                                        n,
+                                    ))
+                                }
+                                Some(cap) => {
+                                    let path = &cap[1];
+                                    fetch_include(format!("std/{path}")).await
+                                }
+                            },
                             Some(cap) => fetch_include(cap[1].to_string()).await,
                         };
                         if let Some(code) = include {
