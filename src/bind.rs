@@ -119,6 +119,7 @@ impl Binding for SamplerBinding {
 pub struct Time {
     pub frame: u32,
     pub elapsed: f32,
+    pub delta: f32,
 }
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
@@ -255,6 +256,7 @@ impl Bindings {
                 host: Time {
                     frame: 0,
                     elapsed: 0.,
+                    delta: 0.,
                 },
                 serialise: Box::new(|h| bytemuck::bytes_of(h).to_vec()),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {

@@ -305,7 +305,7 @@ impl WgpuToyRenderer {
         }
         s.push_str(
             r#"
-struct Time { frame: uint, elapsed: float }
+struct Time { frame: uint, elapsed: float, delta: float }
 struct Mouse { pos: uint2, click: int }
 struct DispatchInfo { id: uint }
 "#,
@@ -509,6 +509,10 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
 
     pub fn set_time_elapsed(&mut self, t: f32) {
         self.bindings.time.host.elapsed = t;
+    }
+
+    pub fn set_time_delta(&mut self, t: f32) {
+        self.bindings.time.host.delta = t;
     }
 
     pub fn set_mouse_pos(&mut self, x: u32, y: u32) {
