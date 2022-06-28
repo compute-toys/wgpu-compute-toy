@@ -155,7 +155,7 @@ impl WgpuToyRenderer {
             if self.bindings.time.host.frame > 0 {
                 let mean = self.last_stats.elapsed().as_secs_f32() / STATS_PERIOD as f32;
                 self.last_stats = instant::Instant::now();
-                log::info!("{} fps ({} ms)", 1. / mean, 1e3 * mean);
+                log::debug!("{} fps ({} ms)", 1. / mean, 1e3 * mean);
             }
         }
         if SHADER_ERROR.swap(false, Ordering::SeqCst) {
