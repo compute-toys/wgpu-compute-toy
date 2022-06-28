@@ -50,9 +50,10 @@ impl<H> BufferBinding<H> {
     }
     fn stage(&self, queue: &wgpu::Queue) {
         let data = (self.serialise)(&self.host);
-        match wgpu::BufferSize::new(data.len() as u64) {
-            None => log::warn!("no data to stage"),
-            Some(size) => queue.write_buffer(&self.device, 0, &data),
+        if data.len() > 0 {
+            queue.write_buffer(&self.device, 0, &data)
+        } else {
+            log::warn!("no data to stage")
         }
     }
 }
