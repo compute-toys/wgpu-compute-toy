@@ -515,8 +515,11 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         self.bindings.time.host.delta = t;
     }
 
-    pub fn set_mouse_pos(&mut self, x: u32, y: u32) {
-        self.bindings.mouse.host.pos = [x, y];
+    pub fn set_mouse_pos(&mut self, x: f32, y: f32) {
+        self.bindings.mouse.host.pos = [
+            (x * self.screen_width as f32) as u32,
+            (y * self.screen_height as f32) as u32,
+        ];
     }
 
     pub fn set_mouse_click(&mut self, click: bool) {
