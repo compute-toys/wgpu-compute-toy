@@ -3,6 +3,7 @@ use crate::{
     utils::{fetch_include, parse_u32},
 };
 use async_recursion::async_recursion;
+use itertools::Itertools;
 use lazy_regex::*;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -71,19 +72,24 @@ pub struct Preprocessor {
     source: SourceMap,
     storage_count: usize,
     assert_count: usize,
+    enable_strings: bool,
 }
 
 static RE_COMMENT: Lazy<Regex> = lazy_regex!("//.*");
-static RE_QUOTES: Lazy<Regex> = lazy_regex!(r#""(.*)""#);
+static RE_QUOTES: Lazy<Regex> = lazy_regex!(r#""((?:[^\\"]|\\.)*)""#);
 static RE_CHEVRONS: Lazy<Regex> = lazy_regex!("<(.*)>");
 
+const STRING_MAX_LEN: usize = 20;
+
 impl Preprocessor {
-    pub fn new(defines: HashMap<String, String>) -> Self {
+    pub fn new(mut defines: HashMap<String, String>) -> Self {
+        defines.insert("STRING_MAX_LEN".to_string(), STRING_MAX_LEN.to_string());
         Self {
             defines,
             source: SourceMap::new(),
             storage_count: 0,
             assert_count: 0,
+            enable_strings: false,
         }
     }
 
@@ -107,10 +113,10 @@ impl Preprocessor {
     }
 
     #[async_recursion(?Send)]
-    async fn process_line(&mut self, line: &str, n: usize) -> Result<(), WGSLError> {
-        let line = self.subst_defines(line);
+    async fn process_line(&mut self, line_orig: &str, n: usize) -> Result<(), WGSLError> {
+        let mut line = self.subst_defines(line_orig);
         if line.trim().chars().nth(0) == Some('#') {
-            let line = RE_COMMENT.replace(&line, "");
+            line = RE_COMMENT.replace(&line, "").to_string();
             let tokens: Vec<&str> = line.trim().split(" ").collect();
             match tokens[..] {
                 ["#include", name] => {
@@ -124,6 +130,9 @@ impl Preprocessor {
                             }
                             Some(cap) => {
                                 let path = &cap[1];
+                                if path == "string" {
+                                    self.enable_strings = true;
+                                }
                                 fetch_include(format!("std/{path}")).await
                             }
                         },
@@ -131,7 +140,6 @@ impl Preprocessor {
                     };
                     if let Some(code) = include {
                         for line in code.lines() {
-                            let line = self.subst_defines(line);
                             self.process_line(&line, n).await?
                         }
                     } else {
@@ -149,7 +157,16 @@ impl Preprocessor {
                         .dispatch_count
                         .insert(name.to_string(), parse_u32(x, n)?);
                 }
-                ["#define", l, r] => {
+                ["#define", ..] => {
+                    let l = line_orig
+                        .trim()
+                        .split(" ")
+                        .nth(1)
+                        .ok_or(WGSLError::new(format!("Parse error"), n))?;
+                    let r = tokens[2..].join(" ");
+                    if self.defines.get(l).is_some() {
+                        return Err(WGSLError::new(format!("Cannot redefine {l}"), n));
+                    }
                     self.defines.insert(l.to_string(), r.to_string());
                 }
                 ["#storage", name, ty] => {
@@ -189,6 +206,33 @@ impl Preprocessor {
                 }
             }
         } else {
+            if self.enable_strings {
+                let mut err = None;
+                line = RE_QUOTES.replace(&line, |caps: &Captures| {
+                    if let Ok(s) = snailquote::unescape(&caps[0]) {
+                        let mut chars: Vec<u32> = s.chars().map(|c| c as u32).collect();
+                        let len = chars.len();
+                        if len > STRING_MAX_LEN {
+                            err = Some(WGSLError::new(
+                                format!(
+                                    "String literals cannot be longer than {STRING_MAX_LEN} characters"
+                                ),
+                                n,
+                            ));
+                        }
+                        chars.resize(STRING_MAX_LEN, 0);
+                        format!(
+                            "String({len}, array<uint,{STRING_MAX_LEN}>({}))",
+                            chars.iter().map(|c| format!("{c:#04x}")).join(", ")
+                        )
+                    } else {
+                        caps[0].to_string()
+                    }
+                }).to_string();
+                if let Some(e) = err {
+                    return Err(e);
+                }
+            }
             self.source.push_line(&line, n);
         }
         Ok(())
