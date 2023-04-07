@@ -11,9 +11,9 @@ crate-type = ["cdylib", "rlib"]
 default = ["console_error_panic_hook"]
 
 [dependencies]
-wasm-bindgen = "0.2.81"
+wasm-bindgen = "0.2.84"
 
-winit = "0.26.1"
+winit = "0.27.1"
 pollster = "0.2.5"
 async-executor = "1.4.1"
 bytemuck = { version = "1.9.1", features = ["derive"] }
@@ -25,7 +25,6 @@ lazy_static = "1.4.0"
 bitvec = "1.0.0"
 lazy-regex = "2.3.0"
 itertools = "0.10.3"
-cached = "0.34.1"
 futures-intrusive = "0.4.0"
 async-recursion = "1.0.0"
 snailquote = "0.3.1"
@@ -51,14 +50,13 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 wee_alloc = { version = "0.4.5", optional = true }
 
 [dependencies.wgpu]
-git = "https://github.com/davidar/wgpu"
-rev = "2fb248d"
-#version = "0.12.0"
+#git = "https://github.com/gfx-rs/wgpu"
+version = "0.14.2"
 
 [dependencies.naga]
 git = "https://github.com/gfx-rs/naga"
-rev = "0b60f410"
-#version = "0.8"
+rev = "c52d91023d43092323615fcc746162e478033f26"
+version = "0.10.0"
 features = ["wgsl-in"]
 
 [dependencies.image]
@@ -69,6 +67,11 @@ features = ["png", "jpeg", "hdr"]
 [dependencies.instant]
 version = "0.1.12"
 features = ["wasm-bindgen"]
+
+[dependencies.cached]
+version = "0.42.0"
+default-features = false
+features = ["proc_macro", "wasm"]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.31"

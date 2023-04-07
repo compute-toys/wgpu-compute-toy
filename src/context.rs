@@ -69,15 +69,18 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
         .request_device(&Default::default(), None)
         .await
         .map_err(|e| e.to_string())?;
+    //let surface_format = surface.get_capabilities(&adapter).formats[0];
     let surface_format = surface.get_supported_formats(&adapter)[0];
     surface.configure(
         &device,
         &wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
+            //view_formats: vec![],
             width,
             height,
             present_mode: wgpu::PresentMode::Fifo, // vsync
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
         },
     );
     log::info!("adapter.limits = {:#?}", adapter.limits());

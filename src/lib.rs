@@ -396,7 +396,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         let re_parser = regex!(r"(?s):(\d+):(\d+) (.*)");
         let re_invalid = regex!(r"\[Invalid \w+\] is invalid.");
         let sourcemap_clone = source.map.clone();
-        self.wgpu.device.on_uncaptured_error(move |e: wgpu::Error| {
+        self.wgpu.device.on_uncaptured_error(Box::new(move |e: wgpu::Error| {
             let err = &e.to_string();
             if re_invalid.is_match(err) {
                 return;
@@ -421,7 +421,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                     SHADER_ERROR.store(true, Ordering::SeqCst);
                 }
             }
-        });
+        }));
 
         let wgsl = &(prelude + &source.source);
         match wgsl::parse_str(&wgsl) {
@@ -439,7 +439,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                 let compute_shader =
                     self.wgpu
                         .device
-                        .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                        .create_shader_module(wgpu::ShaderModuleDescriptor {
                             label: None,
                             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
                         });
@@ -663,6 +663,7 @@ fn create_texture_from_image(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
+        //view_formats: &[],
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         label: None,
     });
