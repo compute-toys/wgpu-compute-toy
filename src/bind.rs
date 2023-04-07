@@ -1,6 +1,7 @@
 use crate::WgpuContext;
 use bitvec::prelude::*;
 use itertools::Itertools;
+use num::Integer;
 use std::collections::HashMap;
 use std::mem::size_of;
 
@@ -160,6 +161,11 @@ impl Drop for Bindings {
     }
 }
 
+fn uniform_buffer_size<T>() -> u64 {
+    let size = size_of::<T>() as u64;
+    return size.div_ceil(&16) * 16;
+}
+
 impl Bindings {
     pub fn new(wgpu: &WgpuContext, width: u32, height: u32, pass_f32: bool) -> Self {
         log::info!("Creating bindings");
@@ -265,7 +271,7 @@ impl Bindings {
                 serialise: Box::new(|h| bytemuck::bytes_of(h).to_vec()),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
-                    size: size_of::<Time>() as u64,
+                    size: uniform_buffer_size::<Time>(),
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
                     mapped_at_creation: false,
                 }),
@@ -281,7 +287,7 @@ impl Bindings {
                 serialise: Box::new(|h| bytemuck::bytes_of(h).to_vec()),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
-                    size: size_of::<Mouse>() as u64,
+                    size: uniform_buffer_size::<Mouse>(),
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
                     mapped_at_creation: false,
                 }),
@@ -294,7 +300,7 @@ impl Bindings {
                 serialise: Box::new(|h| h.as_raw_slice().to_vec()),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
-                    size: (NUM_KEYCODES / 8) as u64,
+                    size: uniform_buffer_size::<[u8; NUM_KEYCODES / 8]>(),
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
                     mapped_at_creation: false,
                 }),
@@ -314,7 +320,7 @@ impl Bindings {
                 }),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
-                    size: (MAX_CUSTOM_PARAMS * size_of::<f32>()) as u64,
+                    size: uniform_buffer_size::<[f32; MAX_CUSTOM_PARAMS]>(),
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
                     mapped_at_creation: false,
                 }),
@@ -331,7 +337,7 @@ impl Bindings {
                 }),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
-                    size: USER_DATA_BYTES as u64,
+                    size: uniform_buffer_size::<[u8; USER_DATA_BYTES]>(),
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
                     mapped_at_creation: false,
                 }),
@@ -375,7 +381,7 @@ impl Bindings {
                 serialise: Box::new(|_| vec![]),
                 device: wgpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
-                    size: (NUM_ASSERT_COUNTERS * size_of::<u32>()) as u64,
+                    size: uniform_buffer_size::<[u32; NUM_ASSERT_COUNTERS]>(),
                     usage: wgpu::BufferUsages::STORAGE
                         | wgpu::BufferUsages::COPY_SRC
                         | wgpu::BufferUsages::COPY_DST,
