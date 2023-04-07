@@ -1,9 +1,15 @@
 # wgputoy
 
+[Install wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
+
 ## Build with `wasm-pack build`
 
 ```
 wasm-pack build
+```
+
+```
+wasm-pack build --dev && cp -rv pkg/. site/lib/wgputoy/
 ```
 
 ## Test in Headless Browsers with `wasm-pack test`

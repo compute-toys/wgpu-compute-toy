@@ -22,7 +22,7 @@ impl Blitter {
     ) -> Self {
         let render_shader = wgpu
             .device
-            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
             });
@@ -91,7 +91,7 @@ impl Blitter {
                         (ColourSpace::Rgbe, wgpu::TextureFormat::Rgba16Float) => "fs_main_rgbe_to_linear",
                         _ => panic!("Blitter: unrecognised conversion from {src_space:?} to {dest_format:?}")
                     },
-                    targets: &[dest_format.into()],
+                    targets: &[Some(dest_format.into())],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
@@ -105,14 +105,14 @@ impl Blitter {
     pub fn blit(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
-            color_attachments: &[wgpu::RenderPassColorAttachment {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
                     store: true,
                 },
-            }],
+            })],
             depth_stencil_attachment: None,
         });
         render_pass.set_pipeline(&self.render_pipeline);
@@ -137,6 +137,7 @@ impl Blitter {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: self.dest_format,
+            //view_formats: &[],
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
             label: None,
         });
