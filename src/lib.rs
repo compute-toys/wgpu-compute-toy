@@ -298,9 +298,9 @@ impl WgpuToyRenderer {
     pub fn prelude(&self) -> String {
         let mut s = String::new();
         for (a, t) in [("int", "i32"), ("uint", "u32"), ("float", "f32")] {
-            s.push_str(&format!("type {a} = {t};\n"));
+            s.push_str(&format!("alias {a} = {t};\n"));
             for n in [2, 3, 4] {
-                s.push_str(&format!("type {a}{n} = vec{n}<{t}>;\n"));
+                s.push_str(&format!("alias {a}{n} = vec{n}<{t}>;\n"));
             }
         }
         s.push_str(

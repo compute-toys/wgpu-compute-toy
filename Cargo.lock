@@ -1143,8 +1143,8 @@ dependencies = [
 
 [[package]]
 name = "naga"
-version = "0.10.0"
-source = "git+https://github.com/gfx-rs/naga?rev=c52d91023d43092323615fcc746162e478033f26#c52d91023d43092323615fcc746162e478033f26"
+version = "0.11.0"
+source = "git+https://github.com/gfx-rs/naga?rev=99a7773e65f855ecdefc6fc0fffa6f0aacd3f867#99a7773e65f855ecdefc6fc0fffa6f0aacd3f867"
 dependencies = [
  "bit-set",
  "bitflags",
@@ -2110,7 +2110,7 @@ dependencies = [
  "arrayvec 0.7.2",
  "js-sys",
  "log",
- "naga 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga 0.10.0",
  "parking_lot 0.12.1",
  "raw-window-handle 0.5.2",
  "smallvec",
@@ -2136,7 +2136,7 @@ dependencies = [
  "codespan-reporting",
  "fxhash",
  "log",
- "naga 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga 0.10.0",
  "parking_lot 0.12.1",
  "profiling",
  "raw-window-handle 0.5.2",
@@ -2171,7 +2171,7 @@ dependencies = [
  "libloading",
  "log",
  "metal",
- "naga 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga 0.10.0",
  "objc",
  "parking_lot 0.12.1",
  "profiling",
@@ -2217,7 +2217,7 @@ dependencies = [
  "lazy-regex",
  "lazy_static",
  "log",
- "naga 0.10.0 (git+https://github.com/gfx-rs/naga?rev=c52d91023d43092323615fcc746162e478033f26)",
+ "naga 0.11.0",
  "num",
  "pollster",
  "regex",

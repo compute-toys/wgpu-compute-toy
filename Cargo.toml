@@ -55,8 +55,8 @@ version = "0.14.2"
 
 [dependencies.naga]
 git = "https://github.com/gfx-rs/naga"
-rev = "c52d91023d43092323615fcc746162e478033f26"
-version = "0.10.0"
+rev = "99a7773e65f855ecdefc6fc0fffa6f0aacd3f867"
+version = "0.11.0"
 features = ["wgsl-in"]
 
 [dependencies.image]
