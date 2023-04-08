@@ -2,7 +2,8 @@ use std::error::Error;
 use wgputoy::context::init_wgpu;
 use wgputoy::WgpuToyRenderer;
 
-async fn run() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let wgpu = init_wgpu(800, 600, "").await?;
     let mut wgputoy = WgpuToyRenderer::new(wgpu);
     let filename = if std::env::args().len() > 1 {
@@ -37,8 +38,4 @@ async fn run() -> Result<(), Box<dyn Error>> {
             _ => (),
         }
     });
-}
-
-fn main() -> Result<(), Box<dyn Error>> {
-    pollster::block_on(run())
 }

@@ -39,6 +39,7 @@ gloo-net = "0.2.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = "0.11.16"
+tokio = { version = "1.27.0", features = ["full"] }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
