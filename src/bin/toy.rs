@@ -42,7 +42,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
             winit::event::Event::RedrawRequested(_) => {
                 let time = start_time.elapsed().as_micros() as f32 * 1e-6;
                 wgputoy.set_time_elapsed(time);
-                wgputoy.render();
+                let future = wgputoy.render_async();
+                let executor = async_executor::LocalExecutor::new();
+                executor.spawn(future).detach();
+                while executor.try_tick() {}
             }
             winit::event::Event::MainEventsCleared => {
                 wgputoy.wgpu.window.request_redraw();

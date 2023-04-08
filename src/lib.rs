@@ -141,6 +141,20 @@ impl WgpuToyRenderer {
         }
     }
 
+    pub async fn render_async(&mut self) {
+        match self.wgpu.surface.get_current_texture() {
+            Err(e) => log::error!("Unable to get framebuffer: {e}"),
+            Ok(f) => {
+                let staging_buffer = self.render_to(f);
+                Self::postrender(
+                    staging_buffer,
+                    self.screen_width * self.screen_height,
+                    self.source.assert_map.clone(),
+                ).await
+            }
+        }
+    }
+
     fn render_to(&mut self, frame: wgpu::SurfaceTexture) -> Option<wgpu::Buffer> {
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
         self.bindings.stage(&self.wgpu.queue);
@@ -266,7 +280,12 @@ impl WgpuToyRenderer {
             if let Some(buf) = staging_buffer {
                 let buffer_slice = buf.slice(..);
                 let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-                buffer_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
+                buffer_slice.map_async(wgpu::MapMode::Read, move |v| {
+                    match sender.send(v) {
+                        Ok(()) => {}
+                        Err(_) => log::error!("Channel closed unexpectedly"),
+                    }
+                });
                 match receiver.receive().await {
                     None => log::error!("Channel closed unexpectedly"),
                     Some(Err(e)) => log::error!("{e}"),
