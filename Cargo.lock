@@ -1231,26 +1231,6 @@ dependencies = [
 [[package]]
 name = "naga"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5eafe22a23b797c9bc227c6c896419b26b5bb88fa903417a3adaed08778850d5"
-dependencies = [
- "bit-set",
- "bitflags",
- "codespan-reporting",
- "hexf-parse",
- "indexmap",
- "log",
- "num-traits",
- "rustc-hash",
- "spirv",
- "termcolor",
- "thiserror",
- "unicode-xid",
-]
-
-[[package]]
-name = "naga"
-version = "0.11.0"
 source = "git+https://github.com/gfx-rs/naga?rev=99a7773e65f855ecdefc6fc0fffa6f0aacd3f867#99a7773e65f855ecdefc6fc0fffa6f0aacd3f867"
 dependencies = [
  "bit-set",
@@ -1261,6 +1241,7 @@ dependencies = [
  "log",
  "num-traits",
  "rustc-hash",
+ "spirv",
  "termcolor",
  "thiserror",
  "unicode-xid",
@@ -2255,7 +2236,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "js-sys",
  "log",
- "naga 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga 0.11.0",
  "parking_lot 0.12.1",
  "profiling",
  "raw-window-handle 0.5.2",
@@ -2305,7 +2286,7 @@ dependencies = [
  "codespan-reporting",
  "fxhash",
  "log",
- "naga 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga 0.11.0",
  "parking_lot 0.12.1",
  "profiling",
  "raw-window-handle 0.5.2",
@@ -2382,7 +2363,7 @@ dependencies = [
  "libloading",
  "log",
  "metal",
- "naga 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga 0.11.0",
  "objc",
  "parking_lot 0.12.1",
  "profiling",
@@ -2439,7 +2420,7 @@ dependencies = [
  "lazy-regex",
  "lazy_static",
  "log",
- "naga 0.11.0 (git+https://github.com/gfx-rs/naga?rev=99a7773e65f855ecdefc6fc0fffa6f0aacd3f867)",
+ "naga 0.11.0",
  "num",
  "pollster",
  "regex",

@@ -56,10 +56,12 @@ version = "0.14.2"
 version = "0.15.1"
 
 [dependencies.naga]
-git = "https://github.com/gfx-rs/naga"
-rev = "99a7773e65f855ecdefc6fc0fffa6f0aacd3f867"
 version = "0.11.0"
 features = ["wgsl-in"]
+
+[patch.crates-io.naga]
+git = "https://github.com/gfx-rs/naga"
+rev = "99a7773e65f855ecdefc6fc0fffa6f0aacd3f867"
 
 [dependencies.image]
 version = "0.24.2"
