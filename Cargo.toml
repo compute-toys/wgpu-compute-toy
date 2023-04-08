@@ -30,17 +30,6 @@ futures-intrusive = "0.4.0"
 async-recursion = "1.0.0"
 snailquote = "0.3.1"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-console_log = "0.2.0"
-js-sys = "0.3.57"
-web-sys = "0.3.57"
-gloo-utils = "0.1.4"
-gloo-net = "0.2.1"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-reqwest = "0.11.16"
-tokio = { version = "1.27.0", features = ["full"] }
-
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
@@ -53,6 +42,17 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 #
 # Unfortunately, `wee_alloc` requires nightly Rust when targeting wasm for now.
 wee_alloc = { version = "0.4.5", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_log = "0.2.0"
+js-sys = "0.3.57"
+web-sys = "0.3.57"
+gloo-utils = "0.1.4"
+gloo-net = "0.2.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = "0.11.16"
+tokio = { version = "1.27.0", features = ["full"] }
 
 # https://github.com/gfx-rs/wgpu/issues/3430
 [target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
