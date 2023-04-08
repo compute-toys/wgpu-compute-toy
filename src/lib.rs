@@ -150,7 +150,8 @@ impl WgpuToyRenderer {
                     staging_buffer,
                     self.screen_width * self.screen_height,
                     self.source.assert_map.clone(),
-                ).await
+                )
+                .await
             }
         }
     }
@@ -280,11 +281,9 @@ impl WgpuToyRenderer {
             if let Some(buf) = staging_buffer {
                 let buffer_slice = buf.slice(..);
                 let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-                buffer_slice.map_async(wgpu::MapMode::Read, move |v| {
-                    match sender.send(v) {
-                        Ok(()) => {}
-                        Err(_) => log::error!("Channel closed unexpectedly"),
-                    }
+                buffer_slice.map_async(wgpu::MapMode::Read, move |v| match sender.send(v) {
+                    Ok(()) => {}
+                    Err(_) => log::error!("Channel closed unexpectedly"),
                 });
                 match receiver.receive().await {
                     None => log::error!("Channel closed unexpectedly"),
@@ -424,32 +423,34 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         let re_parser = regex!(r"(?s):(\d+):(\d+) (.*)");
         let re_invalid = regex!(r"\[Invalid \w+\] is invalid.");
         let sourcemap_clone = source.map.clone();
-        self.wgpu.device.on_uncaptured_error(Box::new(move |e: wgpu::Error| {
-            let err = &e.to_string();
-            if re_invalid.is_match(err) {
-                return;
-            }
-            match re_parser.captures(err) {
-                None => {
-                    log::error!("{e}");
-                    WGSLError::handler(err, 0, 0);
+        self.wgpu
+            .device
+            .on_uncaptured_error(Box::new(move |e: wgpu::Error| {
+                let err = &e.to_string();
+                if re_invalid.is_match(err) {
+                    return;
                 }
-                Some(cap) => {
-                    let row = cap[1].parse().unwrap_or(prelude_len);
-                    let col = cap[2].parse().unwrap_or(0);
-                    let summary = &cap[3];
-                    let mut n = 0;
-                    if row >= prelude_len {
-                        n = row - prelude_len;
+                match re_parser.captures(err) {
+                    None => {
+                        log::error!("{e}");
+                        WGSLError::handler(err, 0, 0);
                     }
-                    if n < sourcemap_clone.len() {
-                        n = sourcemap_clone[n];
+                    Some(cap) => {
+                        let row = cap[1].parse().unwrap_or(prelude_len);
+                        let col = cap[2].parse().unwrap_or(0);
+                        let summary = &cap[3];
+                        let mut n = 0;
+                        if row >= prelude_len {
+                            n = row - prelude_len;
+                        }
+                        if n < sourcemap_clone.len() {
+                            n = sourcemap_clone[n];
+                        }
+                        WGSLError::handler(summary, n, col);
+                        SHADER_ERROR.store(true, Ordering::SeqCst);
                     }
-                    WGSLError::handler(summary, n, col);
-                    SHADER_ERROR.store(true, Ordering::SeqCst);
                 }
-            }
-        }));
+            }));
 
         let wgsl = &(prelude + &source.source);
         match wgsl::parse_str(&wgsl) {
