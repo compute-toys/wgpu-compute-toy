@@ -387,6 +387,15 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         utils::promise(async move { pp::Preprocessor::new(defines).run(&shader).await })
     }
 
+    pub async fn preprocess_async(&self, shader: &str) -> Option<SourceMap> {
+        let shader = shader.to_owned();
+        let defines = HashMap::from([
+            ("SCREEN_WIDTH".to_owned(), self.screen_width.to_string()),
+            ("SCREEN_HEIGHT".to_owned(), self.screen_height.to_string()),
+        ]);
+        pp::Preprocessor::new(defines).run(&shader).await
+    }
+
     pub fn compile(&mut self, source: SourceMap) {
         let now = instant::Instant::now();
         let prelude = self.prelude(); // prelude must be generated after preprocessor has run
@@ -663,9 +672,10 @@ fn create_texture_from_image(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        //view_formats: &[],
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         label: None,
+        #[cfg(not(target_arch = "wasm32"))]
+        view_formats: &[],
     });
     wgpu.queue.write_texture(
         texture.as_image_copy(),

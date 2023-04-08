@@ -55,8 +55,17 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
     let size = winit::dpi::Size::Physical(winit::dpi::PhysicalSize::new(width, height));
     let event_loop = winit::event_loop::EventLoop::new();
     let window = init_window(size, &event_loop, bind_id).map_err(|e| e.to_string())?;
+
+    #[cfg(target_arch = "wasm32")]
     let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
+    #[cfg(not(target_arch = "wasm32"))]
+    let instance = wgpu::Instance::default();
+
+    #[cfg(target_arch = "wasm32")]
     let surface = unsafe { instance.create_surface(&window) };
+    #[cfg(not(target_arch = "wasm32"))]
+    let surface = unsafe { instance.create_surface(&window) }.map_err(|e| e.to_string())?;
+
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: Default::default(),
@@ -69,18 +78,23 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
         .request_device(&Default::default(), None)
         .await
         .map_err(|e| e.to_string())?;
-    //let surface_format = surface.get_capabilities(&adapter).formats[0];
+
+    #[cfg(target_arch = "wasm32")]
     let surface_format = surface.get_supported_formats(&adapter)[0];
+    #[cfg(not(target_arch = "wasm32"))]
+    let surface_format = surface.get_capabilities(&adapter).formats[0];
+
     surface.configure(
         &device,
         &wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            //view_formats: vec![],
             width,
             height,
             present_mode: wgpu::PresentMode::Fifo, // vsync
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            #[cfg(not(target_arch = "wasm32"))]
+            view_formats: vec![],
         },
     );
     log::info!("adapter.limits = {:#?}", adapter.limits());

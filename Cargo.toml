@@ -49,9 +49,11 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 # Unfortunately, `wee_alloc` requires nightly Rust when targeting wasm for now.
 wee_alloc = { version = "0.4.5", optional = true }
 
-[dependencies.wgpu]
-#git = "https://github.com/gfx-rs/wgpu"
+# https://github.com/gfx-rs/wgpu/issues/3430
+[target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
 version = "0.14.2"
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.wgpu]
+version = "0.15.1"
 
 [dependencies.naga]
 git = "https://github.com/gfx-rs/naga"
