@@ -21,9 +21,11 @@ use wasm_bindgen::prelude::*;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
 struct SuccessCallback(Option<js_sys::Function>);
 
+#[cfg(target_arch = "wasm32")]
 impl SuccessCallback {
     fn call(&self, entry_points: Vec<String>) {
         match self.0 {
@@ -46,6 +48,9 @@ impl SuccessCallback {
         }
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+struct SuccessCallback(Option<()>);
 
 struct ComputePipeline {
     name: String,
@@ -127,6 +132,7 @@ impl WgpuToyRenderer {
 
 #[wasm_bindgen]
 impl WgpuToyRenderer {
+    #[cfg(target_arch = "wasm32")]
     pub fn render(&mut self) {
         match self.wgpu.surface.get_current_texture() {
             Err(e) => log::error!("Unable to get framebuffer: {e}"),
@@ -141,6 +147,7 @@ impl WgpuToyRenderer {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn render_async(&mut self) {
         match self.wgpu.surface.get_current_texture() {
             Err(e) => log::error!("Unable to get framebuffer: {e}"),
@@ -396,6 +403,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         self.on_success_cb.call(entry_points);
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn preprocess(&self, shader: &str) -> js_sys::Promise {
         let shader = shader.to_owned();
         let defines = HashMap::from([
@@ -405,6 +413,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         utils::promise(async move { pp::Preprocessor::new(defines).run(&shader).await })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn preprocess_async(&self, shader: &str) -> Option<SourceMap> {
         let shader = shader.to_owned();
         let defines = HashMap::from([
@@ -559,6 +568,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         self.bindings.keys.host.set(keycode, keydown);
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn set_custom_floats(&mut self, names: Vec<js_sys::JsString>, values: Vec<f32>) {
         self.bindings.custom.host = (names.iter().map(From::from).collect(), values);
     }
@@ -599,6 +609,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         );
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn on_success(&mut self, callback: js_sys::Function) {
         self.on_success_cb = SuccessCallback(Some(callback));
     }
