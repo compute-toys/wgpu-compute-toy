@@ -4,9 +4,12 @@ use wgputoy::context::init_wgpu;
 use wgputoy::WgpuToyRenderer;
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct ShaderMeta {
     uniforms: Vec<Uniform>,
     textures: Vec<Texture>,
+    #[serde(default)]
+    float32_enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,6 +44,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if let Ok(json) = std::fs::read_to_string(std::format!("{filename}.json")) {
         let metadata: ShaderMeta = serde_json::from_str(&json)?;
+        println!("{:?}", metadata);
+
         for (i, texture) in metadata.textures.iter().enumerate() {
             let img = if texture.img.starts_with("http") {
                 let resp = client.get(&texture.img).send().await?;
@@ -54,11 +59,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 wgputoy.load_channel(i, &img);
             }
         }
+
         let uniform_names: Vec<String> = metadata.uniforms.iter().map(|u| u.name.clone()).collect();
         let uniform_values: Vec<f32> = metadata.uniforms.iter().map(|u| u.value).collect();
         if uniform_names.len() > 0 {
             wgputoy.set_custom_floats(uniform_names, uniform_values);
         }
+
+        wgputoy.set_pass_f32(metadata.float32_enabled);
     }
 
     if let Some(source) = wgputoy.preprocess_async(&shader).await {

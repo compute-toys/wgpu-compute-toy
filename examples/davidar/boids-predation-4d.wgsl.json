@@ -1,0 +1,69 @@
+{
+    "uniforms": [
+        {
+            "name": "Zoom",
+            "value": 0.646
+        },
+        {
+            "name": "Accumulation",
+            "value": 0.723
+        },
+        {
+            "name": "DistSeparation",
+            "value": 0.103
+        },
+        {
+            "name": "DistCohesion",
+            "value": 0.142
+        },
+        {
+            "name": "MaxForce",
+            "value": 0.295
+        },
+        {
+            "name": "MaxSpeed",
+            "value": 0.266
+        },
+        {
+            "name": "DistPredation",
+            "value": 0.579
+        },
+        {
+            "name": "PredSpeed",
+            "value": 0.5
+        },
+        {
+            "name": "PredForce",
+            "value": 0.422
+        },
+        {
+            "name": "DistPrey",
+            "value": 0.547
+        },
+        {
+            "name": "Homing",
+            "value": 0.165
+        },
+        {
+            "name": "Timescale",
+            "value": 0.495
+        },
+        {
+            "name": "Rotation",
+            "value": 0.135
+        },
+        {
+            "name": "DistSeparationPred",
+            "value": 0.218
+        }
+    ],
+    "textures": [
+        {
+            "img": "/textures/blank.png"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ],
+    "float32Enabled": false
+}

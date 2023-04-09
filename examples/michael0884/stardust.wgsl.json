@@ -1,0 +1,56 @@
+{
+    "uniforms": [
+        {
+            "name": "Radius",
+            "value": 0.551
+        },
+        {
+            "name": "TimeStep",
+            "value": 0.313
+        },
+        {
+            "name": "Samples",
+            "value": 0.632
+        },
+        {
+            "name": "BlurRadius",
+            "value": 0.489
+        },
+        {
+            "name": "VelocityDecay",
+            "value": 0.018
+        },
+        {
+            "name": "Speed",
+            "value": 0.697
+        },
+        {
+            "name": "BlurExponent1",
+            "value": 0.621
+        },
+        {
+            "name": "BlurExponent2",
+            "value": 0
+        },
+        {
+            "name": "AnimatedNoise",
+            "value": 1
+        },
+        {
+            "name": "Accumulation",
+            "value": 0.962
+        },
+        {
+            "name": "Exposure",
+            "value": 0.224
+        }
+    ],
+    "textures": [
+        {
+            "img": "/textures/blank.png"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ]
+}

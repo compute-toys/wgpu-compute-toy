@@ -1,0 +1,11 @@
+{
+    "uniforms": [],
+    "textures": [
+        {
+            "img": "/textures/london.jpg"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ]
+}
