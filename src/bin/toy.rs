@@ -23,10 +23,8 @@ struct Texture {
     img: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn init() -> Result<WgpuToyRenderer, Box<dyn Error>> {
     let wgpu = init_wgpu(1280, 720, "").await?;
-    let screen_size = wgpu.window.inner_size();
     let mut wgputoy = WgpuToyRenderer::new(wgpu);
 
     let filename = if std::env::args().len() > 1 {
@@ -74,9 +72,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{}", source.source);
         wgputoy.compile(source);
     }
+    Ok(wgputoy)
+}
 
+fn main() -> Result<(), Box<dyn Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let mut wgputoy = runtime.block_on(init())?;
+    let screen_size = wgputoy.wgpu.window.inner_size();
     let start_time = std::time::Instant::now();
     let event_loop = std::mem::take(&mut wgputoy.wgpu.event_loop).unwrap();
+    let device_clone = wgputoy.wgpu.device.clone();
+    std::thread::spawn(move || loop {
+        device_clone.poll(wgpu::Maintain::Wait);
+    });
     event_loop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
         match event {
@@ -84,9 +94,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let time = start_time.elapsed().as_micros() as f32 * 1e-6;
                 wgputoy.set_time_elapsed(time);
                 let future = wgputoy.render_async();
-                let executor = async_executor::LocalExecutor::new();
-                executor.spawn(future).detach();
-                while executor.try_tick() {}
+                runtime.block_on(future);
             }
             winit::event::Event::MainEventsCleared => {
                 wgputoy.wgpu.window.request_redraw();

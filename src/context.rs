@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use crate::utils::set_panic_hook;
 
 pub struct WgpuContext {
     pub event_loop: Option<winit::event_loop::EventLoop<()>>,
     pub window: winit::window::Window,
-    pub device: wgpu::Device,
+    pub device: Arc<wgpu::Device>,
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface,
     pub surface_format: wgpu::TextureFormat,
@@ -44,7 +46,9 @@ fn init_window(
     event_loop: &winit::event_loop::EventLoop<()>,
     _: &str,
 ) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
-    env_logger::init();
+    env_logger::init_from_env(
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+    );
     let window = winit::window::WindowBuilder::new()
         .with_inner_size(size)
         .build(event_loop)?;
@@ -101,7 +105,7 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
     Ok(WgpuContext {
         event_loop: Some(event_loop),
         window,
-        device,
+        device: Arc::new(device),
         queue,
         surface,
         surface_format,

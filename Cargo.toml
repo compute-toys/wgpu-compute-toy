@@ -16,7 +16,6 @@ wasm-bindgen-futures = "0.4.31"
 
 winit = "0.27.1"
 pollster = "0.2.5"
-async-executor = "1.4.1"
 bytemuck = { version = "1.9.1", features = ["derive"] }
 log = "0.4.17"
 env_logger = "0.9.0"
