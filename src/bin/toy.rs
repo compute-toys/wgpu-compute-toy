@@ -33,11 +33,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
         wgputoy.compile(source);
     }
 
+    let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+        .with(reqwest_middleware_cache::Cache {
+            mode: reqwest_middleware_cache::CacheMode::Default,
+            cache_manager: reqwest_middleware_cache::managers::CACacheManager::default(),
+        })
+        .build();
+
     if let Ok(json) = std::fs::read_to_string(std::format!("{filename}.json")) {
         let metadata: ShaderMeta = serde_json::from_str(&json)?;
         for (i, texture) in metadata.textures.iter().enumerate() {
-            let img = std::fs::read(&std::format!("site/public/{}", texture.img))?;
-            wgputoy.load_channel(i, &img);
+            let img = if texture.img.starts_with("http") {
+                let resp = client.get(&texture.img).send().await?;
+                resp.bytes().await?.to_vec()
+            } else {
+                std::fs::read(&std::format!("site/public/{}", texture.img))?
+            };
+            if texture.img.ends_with(".hdr") {
+                wgputoy.load_channel_hdr(i, &img)?;
+            } else {
+                wgputoy.load_channel(i, &img);
+            }
         }
     }
 
