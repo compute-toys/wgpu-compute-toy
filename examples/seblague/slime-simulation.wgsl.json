@@ -1,0 +1,57 @@
+{
+    "uniforms": [
+        {
+            "name": "DecayRate",
+            "value": 0.101
+        },
+        {
+            "name": "TrailWeight",
+            "value": 0.25
+        },
+        {
+            "name": "DiffuseRate",
+            "value": 0.607
+        },
+        {
+            "name": "MoveSpeed",
+            "value": 0.258
+        },
+        {
+            "name": "TurnSpeed1",
+            "value": 0.307
+        },
+        {
+            "name": "SensorAngle1",
+            "value": 0.25
+        },
+        {
+            "name": "SensorOffset1",
+            "value": 0.411
+        },
+        {
+            "name": "TurnSpeed2",
+            "value": 0.905
+        },
+        {
+            "name": "SensorAngle2",
+            "value": 0.622
+        },
+        {
+            "name": "SensorOffset2",
+            "value": 0.599
+        },
+        {
+            "name": "SpeciesAvoidance",
+            "value": 0
+        }
+    ],
+    "textures": [
+        {
+            "img": "/textures/blank.png"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ],
+    "float32Enabled": false
+}

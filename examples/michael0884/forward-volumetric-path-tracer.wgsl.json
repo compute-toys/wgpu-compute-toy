@@ -1,0 +1,52 @@
+{
+    "uniforms": [
+        {
+            "name": "Radius",
+            "value": 0.638
+        },
+        {
+            "name": "Samples",
+            "value": 0
+        },
+        {
+            "name": "Laser",
+            "value": 0
+        },
+        {
+            "name": "LightR",
+            "value": 0.579
+        },
+        {
+            "name": "LightAng",
+            "value": 0.835
+        },
+        {
+            "name": "Accumulation",
+            "value": 1
+        },
+        {
+            "name": "NoiseAnimation",
+            "value": 1
+        },
+        {
+            "name": "Bounces",
+            "value": 0.402
+        },
+        {
+            "name": "Scatter",
+            "value": 0.231
+        },
+        {
+            "name": "Absorption",
+            "value": 0.352
+        }
+    ],
+    "textures": [
+        {
+            "img": "/textures/blank.png"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ]
+}
