@@ -2113,6 +2113,9 @@ name = "serde"
 version = "1.0.159"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c04e8343c3daeec41f58990b9d77068df31209f2af111e059e9fe9646693065"
+dependencies = [
+ "serde_derive",
+]
 
 [[package]]
 name = "serde_derive"
@@ -2972,6 +2975,8 @@ dependencies = [
  "pollster",
  "regex",
  "reqwest",
+ "serde",
+ "serde_json",
  "snailquote",
  "tokio",
  "wasm-bindgen",
