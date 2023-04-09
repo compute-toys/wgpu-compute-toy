@@ -1,0 +1,25 @@
+{
+    "uniforms": [
+        {
+            "name": "CosK",
+            "value": 1
+        },
+        {
+            "name": "CosA",
+            "value": 0.814
+        },
+        {
+            "name": "TimeStep",
+            "value": 0.398
+        }
+    ],
+    "textures": [
+        {
+            "img": "/textures/blank.png"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ],
+    "float32Enabled": false
+}
