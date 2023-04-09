@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use wgputoy::context::init_wgpu;
 use wgputoy::WgpuToyRenderer;
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ShaderMeta {
@@ -11,6 +11,8 @@ struct ShaderMeta {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Uniform {
+    name: String,
+    value: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -29,9 +31,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "examples/default.wgsl".to_string()
     };
     let shader = std::fs::read_to_string(&filename)?;
-    if let Some(source) = wgputoy.preprocess_async(&shader).await {
-        wgputoy.compile(source);
-    }
 
     let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
         .with(reqwest_middleware_cache::Cache {
@@ -55,6 +54,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 wgputoy.load_channel(i, &img);
             }
         }
+        let uniform_names: Vec<String> = metadata.uniforms.iter().map(|u| u.name.clone()).collect();
+        let uniform_values: Vec<f32> = metadata.uniforms.iter().map(|u| u.value).collect();
+        if uniform_names.len() > 0 {
+            wgputoy.set_custom_floats(uniform_names, uniform_values);
+        }
+    }
+
+    if let Some(source) = wgputoy.preprocess_async(&shader).await {
+        wgputoy.compile(source);
     }
 
     let start_time = std::time::Instant::now();

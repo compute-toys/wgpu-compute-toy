@@ -130,7 +130,7 @@ impl WgpuToyRenderer {
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl WgpuToyRenderer {
     #[cfg(target_arch = "wasm32")]
     pub fn render(&mut self) {
@@ -571,6 +571,11 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
     #[cfg(target_arch = "wasm32")]
     pub fn set_custom_floats(&mut self, names: Vec<js_sys::JsString>, values: Vec<f32>) {
         self.bindings.custom.host = (names.iter().map(From::from).collect(), values);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_custom_floats(&mut self, names: Vec<String>, values: Vec<f32>) {
+        self.bindings.custom.host = (names, values);
     }
 
     pub fn set_pass_f32(&mut self, pass_f32: bool) {
