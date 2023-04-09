@@ -25,7 +25,8 @@ struct Texture {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let wgpu = init_wgpu(800, 600, "").await?;
+    let wgpu = init_wgpu(1280, 720, "").await?;
+    let screen_size = wgpu.window.inner_size();
     let mut wgputoy = WgpuToyRenderer::new(wgpu);
 
     let filename = if std::env::args().len() > 1 {
@@ -70,6 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(source) = wgputoy.preprocess_async(&shader).await {
+        println!("{}", source.source);
         wgputoy.compile(source);
     }
 
@@ -93,6 +95,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 event: winit::event::WindowEvent::CloseRequested,
                 ..
             } => *control_flow = winit::event_loop::ControlFlow::Exit,
+            winit::event::Event::WindowEvent {
+                event: winit::event::WindowEvent::CursorMoved { position, .. },
+                ..
+            } => wgputoy.set_mouse_pos(
+                position.x as f32 / screen_size.width as f32,
+                position.y as f32 / screen_size.height as f32,
+            ),
+            winit::event::Event::WindowEvent {
+                event: winit::event::WindowEvent::MouseInput { state, .. },
+                ..
+            } => wgputoy.set_mouse_click(state == winit::event::ElementState::Pressed),
             _ => (),
         }
     });
