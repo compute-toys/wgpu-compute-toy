@@ -137,9 +137,10 @@ impl Blitter {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: self.dest_format,
-            //view_formats: &[],
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
             label: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            view_formats: &[],
         });
         let mut encoder = wgpu.device.create_command_encoder(&Default::default());
         let views: Vec<wgpu::TextureView> = (0..mip_level_count)

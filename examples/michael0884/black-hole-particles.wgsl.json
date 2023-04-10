@@ -1,0 +1,69 @@
+{
+    "uniforms": [
+        {
+            "name": "Radius",
+            "value": 0.905
+        },
+        {
+            "name": "TimeStep",
+            "value": 0.036
+        },
+        {
+            "name": "Samples",
+            "value": 0.218
+        },
+        {
+            "name": "AnimatedNoise",
+            "value": 0
+        },
+        {
+            "name": "Accumulation",
+            "value": 1
+        },
+        {
+            "name": "Exposure",
+            "value": 0.313
+        },
+        {
+            "name": "BlurExponent1",
+            "value": 0.393
+        },
+        {
+            "name": "BlurRadius",
+            "value": 0.444
+        },
+        {
+            "name": "BlurExponent2",
+            "value": 0.81
+        },
+        {
+            "name": "KerrA",
+            "value": 0.876
+        },
+        {
+            "name": "KerrQ",
+            "value": 0
+        },
+        {
+            "name": "InitSpeed",
+            "value": 0.719
+        },
+        {
+            "name": "InitThick",
+            "value": 0.22
+        },
+        {
+            "name": "Steps",
+            "value": 0.387
+        }
+    ],
+    "textures": [
+        {
+            "img": "/textures/blank.png"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ],
+    "float32Enabled": true
+}

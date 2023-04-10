@@ -23,7 +23,10 @@ impl WGSLError {
         Self { summary, line }
     }
     pub fn handler(summary: &str, row: usize, col: usize) {
-        wgsl_error_handler(summary, row, col)
+        #[cfg(target_arch = "wasm32")]
+        wgsl_error_handler(summary, row, col);
+        #[cfg(not(target_arch = "wasm32"))]
+        panic!("{}:{}: {}", row, col, summary);
     }
     pub fn submit(&self) {
         Self::handler(&self.summary, self.line, 0)

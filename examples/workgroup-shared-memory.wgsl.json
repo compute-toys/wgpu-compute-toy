@@ -1,0 +1,13 @@
+{
+    "uniforms": [],
+    "textures": [
+        {
+            "img": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_rocks_02/aerial_rocks_02_diff_1k.jpg",
+            "url": "https://polyhaven.com/a/aerial_rocks_02"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ],
+    "float32Enabled": false
+}

@@ -1,7 +1,5 @@
 use crate::WGSLError;
 use cached::proc_macro::cached;
-use gloo_net::http::Request;
-use js_sys::Promise;
 use std::future::Future;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
@@ -33,7 +31,12 @@ pub fn parse_u32(value: &str, line: usize) -> Result<u32, WGSLError> {
 #[cached]
 pub async fn fetch_include(name: String) -> Option<String> {
     let url = format!("https://compute-toys.github.io/include/{name}.wgsl");
-    let resp = Request::get(&url).send().await.ok()?;
+
+    #[cfg(target_arch = "wasm32")]
+    let resp = gloo_net::http::Request::get(&url).send().await.ok()?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let resp = reqwest::get(&url).await.ok()?;
+
     if resp.status() == 200 {
         resp.text().await.ok()
     } else {
@@ -41,14 +44,15 @@ pub async fn fetch_include(name: String) -> Option<String> {
     }
 }
 
-pub fn promise<F, T>(future: F) -> Promise
+#[cfg(target_arch = "wasm32")]
+pub fn promise<F, T>(future: F) -> js_sys::Promise
 where
     F: Future<Output = Option<T>> + 'static,
     JsValue: From<T>,
 {
     let mut future = Some(future);
 
-    Promise::new(&mut |resolve, _reject| {
+    js_sys::Promise::new(&mut |resolve, _reject| {
         let future = future.take().unwrap_throw();
 
         wasm_bindgen_futures::spawn_local(async move {

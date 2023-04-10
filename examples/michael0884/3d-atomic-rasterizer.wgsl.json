@@ -1,0 +1,40 @@
+{
+    "uniforms": [
+        {
+            "name": "Radius",
+            "value": 0.082
+        },
+        {
+            "name": "Sine1",
+            "value": 0.513
+        },
+        {
+            "name": "Sine2",
+            "value": 0.534
+        },
+        {
+            "name": "Speed",
+            "value": 0.485
+        },
+        {
+            "name": "Blur",
+            "value": 0
+        },
+        {
+            "name": "Samples",
+            "value": 0.25
+        },
+        {
+            "name": "Mode",
+            "value": 0
+        }
+    ],
+    "textures": [
+        {
+            "img": "/textures/blank.png"
+        },
+        {
+            "img": "/textures/blank.png"
+        }
+    ]
+}

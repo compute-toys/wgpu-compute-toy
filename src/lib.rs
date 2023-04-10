@@ -21,9 +21,11 @@ use wasm_bindgen::prelude::*;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
 struct SuccessCallback(Option<js_sys::Function>);
 
+#[cfg(target_arch = "wasm32")]
 impl SuccessCallback {
     fn call(&self, entry_points: Vec<String>) {
         match self.0 {
@@ -46,6 +48,9 @@ impl SuccessCallback {
         }
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+struct SuccessCallback(Option<()>);
 
 struct ComputePipeline {
     name: String,
@@ -125,8 +130,9 @@ impl WgpuToyRenderer {
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl WgpuToyRenderer {
+    #[cfg(target_arch = "wasm32")]
     pub fn render(&mut self) {
         match self.wgpu.surface.get_current_texture() {
             Err(e) => log::error!("Unable to get framebuffer: {e}"),
@@ -137,6 +143,22 @@ impl WgpuToyRenderer {
                     self.screen_width * self.screen_height,
                     self.source.assert_map.clone(),
                 ));
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn render_async(&mut self) {
+        match self.wgpu.surface.get_current_texture() {
+            Err(e) => log::error!("Unable to get framebuffer: {e}"),
+            Ok(f) => {
+                let staging_buffer = self.render_to(f);
+                Self::postrender(
+                    staging_buffer,
+                    self.screen_width * self.screen_height,
+                    self.source.assert_map.clone(),
+                )
+                .await
             }
         }
     }
@@ -266,7 +288,10 @@ impl WgpuToyRenderer {
             if let Some(buf) = staging_buffer {
                 let buffer_slice = buf.slice(..);
                 let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-                buffer_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
+                buffer_slice.map_async(wgpu::MapMode::Read, move |v| match sender.send(v) {
+                    Ok(()) => {}
+                    Err(_) => log::error!("Channel closed unexpectedly"),
+                });
                 match receiver.receive().await {
                     None => log::error!("Channel closed unexpectedly"),
                     Some(Err(e)) => log::error!("{e}"),
@@ -378,6 +403,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         self.on_success_cb.call(entry_points);
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn preprocess(&self, shader: &str) -> js_sys::Promise {
         let shader = shader.to_owned();
         let defines = HashMap::from([
@@ -385,6 +411,16 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             ("SCREEN_HEIGHT".to_owned(), self.screen_height.to_string()),
         ]);
         utils::promise(async move { pp::Preprocessor::new(defines).run(&shader).await })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn preprocess_async(&self, shader: &str) -> Option<SourceMap> {
+        let shader = shader.to_owned();
+        let defines = HashMap::from([
+            ("SCREEN_WIDTH".to_owned(), self.screen_width.to_string()),
+            ("SCREEN_HEIGHT".to_owned(), self.screen_height.to_string()),
+        ]);
+        pp::Preprocessor::new(defines).run(&shader).await
     }
 
     pub fn compile(&mut self, source: SourceMap) {
@@ -396,32 +432,34 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         let re_parser = regex!(r"(?s):(\d+):(\d+) (.*)");
         let re_invalid = regex!(r"\[Invalid \w+\] is invalid.");
         let sourcemap_clone = source.map.clone();
-        self.wgpu.device.on_uncaptured_error(Box::new(move |e: wgpu::Error| {
-            let err = &e.to_string();
-            if re_invalid.is_match(err) {
-                return;
-            }
-            match re_parser.captures(err) {
-                None => {
-                    log::error!("{e}");
-                    WGSLError::handler(err, 0, 0);
+        self.wgpu
+            .device
+            .on_uncaptured_error(Box::new(move |e: wgpu::Error| {
+                let err = &e.to_string();
+                if re_invalid.is_match(err) {
+                    return;
                 }
-                Some(cap) => {
-                    let row = cap[1].parse().unwrap_or(prelude_len);
-                    let col = cap[2].parse().unwrap_or(0);
-                    let summary = &cap[3];
-                    let mut n = 0;
-                    if row >= prelude_len {
-                        n = row - prelude_len;
+                match re_parser.captures(err) {
+                    None => {
+                        log::error!("{e}");
+                        WGSLError::handler(err, 0, 0);
                     }
-                    if n < sourcemap_clone.len() {
-                        n = sourcemap_clone[n];
+                    Some(cap) => {
+                        let row = cap[1].parse().unwrap_or(prelude_len);
+                        let col = cap[2].parse().unwrap_or(0);
+                        let summary = &cap[3];
+                        let mut n = 0;
+                        if row >= prelude_len {
+                            n = row - prelude_len;
+                        }
+                        if n < sourcemap_clone.len() {
+                            n = sourcemap_clone[n];
+                        }
+                        WGSLError::handler(summary, n, col);
+                        SHADER_ERROR.store(true, Ordering::SeqCst);
                     }
-                    WGSLError::handler(summary, n, col);
-                    SHADER_ERROR.store(true, Ordering::SeqCst);
                 }
-            }
-        }));
+            }));
 
         let wgsl = &(prelude + &source.source);
         match wgsl::parse_str(&wgsl) {
@@ -516,10 +554,12 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
     }
 
     pub fn set_mouse_pos(&mut self, x: f32, y: f32) {
-        self.bindings.mouse.host.pos = [
-            (x * self.screen_width as f32) as u32,
-            (y * self.screen_height as f32) as u32,
-        ];
+        if self.bindings.mouse.host.click == 1 {
+            self.bindings.mouse.host.pos = [
+                (x * self.screen_width as f32) as u32,
+                (y * self.screen_height as f32) as u32,
+            ];
+        }
     }
 
     pub fn set_mouse_click(&mut self, click: bool) {
@@ -530,8 +570,14 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         self.bindings.keys.host.set(keycode, keydown);
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn set_custom_floats(&mut self, names: Vec<js_sys::JsString>, values: Vec<f32>) {
         self.bindings.custom.host = (names.iter().map(From::from).collect(), values);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_custom_floats(&mut self, names: Vec<String>, values: Vec<f32>) {
+        self.bindings.custom.host = (names, values);
     }
 
     pub fn set_pass_f32(&mut self, pass_f32: bool) {
@@ -570,6 +616,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         );
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn on_success(&mut self, callback: js_sys::Function) {
         self.on_success_cb = SuccessCallback(Some(callback));
     }
@@ -663,9 +710,10 @@ fn create_texture_from_image(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        //view_formats: &[],
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         label: None,
+        #[cfg(not(target_arch = "wasm32"))]
+        view_formats: &[],
     });
     wgpu.queue.write_texture(
         texture.as_image_copy(),
