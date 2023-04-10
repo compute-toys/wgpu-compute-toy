@@ -46,12 +46,13 @@ async fn init() -> Result<WgpuToyRenderer, Box<dyn Error>> {
         println!("{:?}", metadata);
 
         for (i, texture) in metadata.textures.iter().enumerate() {
-            let img = if texture.img.starts_with("http") {
-                let resp = client.get(&texture.img).send().await?;
-                resp.bytes().await?.to_vec()
+            let url = if texture.img.starts_with("http") {
+                texture.img.clone()
             } else {
-                std::fs::read(&std::format!("site/public/{}", texture.img))?
+                std::format!("https://compute.toys/{}", texture.img)
             };
+            let resp = client.get(&url).send().await?;
+            let img = resp.bytes().await?.to_vec();
             if texture.img.ends_with(".hdr") {
                 wgputoy.load_channel_hdr(i, &img)?;
             } else {
