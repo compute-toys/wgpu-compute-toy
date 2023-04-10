@@ -1,34 +1,21 @@
-# wgputoy
+# wgpu-compute-toy
+
+This is the compute shader engine for https://compute.toys
+
+As well as running on the web via WebAssembly, it can run natively using standard desktop graphics APIs like Vulkan and DirectX.
+
+## Native
+
+```sh
+cargo run examples/davidar/buddhabrot.wgsl
+```
+
+![screenshot](https://user-images.githubusercontent.com/24291/230871630-7bee3977-8d24-4259-8af6-639232929672.png)
+
+## Web
 
 [Install wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
 
-## Build with `wasm-pack build`
-
 ```
-wasm-pack build
+wasm-pack build --dev && cp -rv pkg/. ../compute.toys/lib/wgputoy/
 ```
-
-```
-wasm-pack build --dev && cp -rv pkg/. site/lib/wgputoy/
-```
-
-## Test in Headless Browsers with `wasm-pack test`
-
-```
-wasm-pack test --headless --firefox
-```
-
-## Publish to NPM with `wasm-pack publish`
-
-```
-wasm-pack publish
-```
-
-## Batteries Included
-
-* [`wasm-bindgen`](https://github.com/rustwasm/wasm-bindgen) for communicating
-  between WebAssembly and JavaScript.
-* [`console_error_panic_hook`](https://github.com/rustwasm/console_error_panic_hook)
-  for logging panic messages to the developer console.
-* [`wee_alloc`](https://github.com/rustwasm/wee_alloc), an allocator optimized
-  for small code size.
