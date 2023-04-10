@@ -20,3 +20,29 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  build-wasm:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout from repo
+        uses: actions/checkout@v3
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          target: wasm32-unknown-unknown
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v1.3.0
+      - name: Set up wasm-pack and build
+        run: |
+          cargo install wasm-pack
+          wasm-pack build --release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: wgputoy-wasm
+          path: pkg
