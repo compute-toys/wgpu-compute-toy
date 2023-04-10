@@ -2,7 +2,7 @@
 
 This is the compute shader engine for https://compute.toys
 
-As well as running on the web via WebAssembly, it can run natively using standard desktop graphics APIs like Vulkan and DirectX.
+As well as running on the web via WebAssembly and WebGPU, it can run natively using standard desktop graphics APIs like Vulkan and DirectX.
 
 ## Native
 
