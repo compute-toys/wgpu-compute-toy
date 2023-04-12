@@ -139,7 +139,6 @@ impl Blitter {
             format: self.dest_format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
             label: None,
-            #[cfg(not(target_arch = "wasm32"))]
             view_formats: &[],
         });
         let mut encoder = wgpu.device.create_command_encoder(&Default::default());
@@ -147,7 +146,7 @@ impl Blitter {
             .map(|base_mip_level| {
                 texture.create_view(&wgpu::TextureViewDescriptor {
                     base_mip_level,
-                    mip_level_count: std::num::NonZeroU32::new(1),
+                    mip_level_count: Some(1),
                     ..Default::default()
                 })
             })

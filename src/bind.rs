@@ -196,7 +196,6 @@ impl Bindings {
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::TEXTURE_BINDING,
             label: None,
-            #[cfg(not(target_arch = "wasm32"))]
             view_formats: &[],
         };
         let channel_layout = wgpu::BindingType::Texture {
@@ -222,7 +221,6 @@ impl Bindings {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            #[cfg(not(target_arch = "wasm32"))]
             view_formats: &[],
         });
         let tex_read = wgpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -241,7 +239,6 @@ impl Bindings {
                 wgpu::TextureFormat::Rgba16Float
             },
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-            #[cfg(not(target_arch = "wasm32"))]
             view_formats: &[],
         });
         let tex_write = wgpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -260,7 +257,6 @@ impl Bindings {
                 wgpu::TextureFormat::Rgba16Float
             },
             usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
-            #[cfg(not(target_arch = "wasm32"))]
             view_formats: &[],
         });
         let channel0 = wgpu.device.create_texture(&blank);

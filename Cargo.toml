@@ -57,11 +57,10 @@ tokio = { version = "1.27.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# https://github.com/gfx-rs/wgpu/issues/3430
-[target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
-version = "0.14.2"
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies.wgpu]
-version = "0.15.1"
+[dependencies.wgpu]
+git = "https://github.com/gfx-rs/wgpu"
+version = "0.15.0"
+rev = "f3bf0f782e4dfc561d48e758e1f1e04f77860925"
 
 [dependencies.naga]
 version = "0.11.0"
@@ -69,7 +68,7 @@ features = ["wgsl-in"]
 
 [patch.crates-io.naga]
 git = "https://github.com/gfx-rs/naga"
-rev = "99a7773e65f855ecdefc6fc0fffa6f0aacd3f867"
+rev = "f59668ccfaf7bdb3a7e43d84363a21c77357b2fe"
 
 [dependencies.image]
 version = "0.24.2"

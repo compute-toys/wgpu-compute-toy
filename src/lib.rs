@@ -712,7 +712,6 @@ fn create_texture_from_image(
         format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         label: None,
-        #[cfg(not(target_arch = "wasm32"))]
         view_formats: &[],
     });
     wgpu.queue.write_texture(
@@ -720,8 +719,8 @@ fn create_texture_from_image(
         rgba,
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: std::num::NonZeroU32::new(4 * width),
-            rows_per_image: std::num::NonZeroU32::new(height),
+            bytes_per_row: Some(4 * width),
+            rows_per_image: Some(height),
         },
         wgpu::Extent3d {
             width,
