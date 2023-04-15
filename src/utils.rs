@@ -28,6 +28,7 @@ pub fn parse_u32(value: &str, line: usize) -> Result<u32, WGSLError> {
     )))
 }
 
+#[cfg(target_arch = "wasm32")]
 #[cached]
 pub async fn fetch_include(name: String) -> Option<String> {
     let url = format!("https://compute-toys.github.io/include/{name}.wgsl");
@@ -42,6 +43,12 @@ pub async fn fetch_include(name: String) -> Option<String> {
     } else {
         None
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_include(name: String) -> Option<String> {
+    let filename = format!("./include/{name}.wgsl");
+    std::fs::read_to_string(&filename).ok()
 }
 
 #[cfg(target_arch = "wasm32")]
