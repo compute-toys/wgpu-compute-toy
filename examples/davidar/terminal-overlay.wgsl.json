@@ -1,0 +1,12 @@
+{
+    "uniforms": [],
+    "textures": [
+        {
+            "img": "/textures/font0.png"
+        },
+        {
+            "img": "/textures/blank.jpg"
+        }
+    ],
+    "float32Enabled": false
+}
