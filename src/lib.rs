@@ -6,7 +6,6 @@ mod utils;
 
 use context::{init_wgpu, WgpuContext};
 use lazy_regex::regex;
-use naga::front::wgsl;
 use num::Integer;
 use pp::{SourceMap, WGSLError};
 use std::collections::HashMap;
@@ -401,6 +400,8 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
     fn handle_success(&self, entry_points: Vec<String>) {
         #[cfg(target_arch = "wasm32")]
         self.on_success_cb.call(entry_points);
+        #[cfg(not(target_arch = "wasm32"))]
+        log::info!("Entry points: {:?}", entry_points);
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -462,87 +463,75 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             }));
 
         let wgsl = &(prelude + &source.source);
-        match wgsl::parse_str(&wgsl) {
-            Ok(module) => {
-                let entry_points: Vec<_> = module
-                    .entry_points
-                    .iter()
-                    .filter(|f| f.stage == naga::ShaderStage::Compute)
-                    .collect();
-                let entry_point_names: Vec<String> = entry_points
-                    .iter()
-                    .map(|entry_point| entry_point.name.clone())
-                    .collect();
-                self.handle_success(entry_point_names);
-                let compute_shader =
-                    self.wgpu
-                        .device
-                        .create_shader_module(wgpu::ShaderModuleDescriptor {
-                            label: None,
-                            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
-                        });
-                self.last_compute_pipelines = Some(take(&mut self.compute_pipelines));
-                self.compute_pipelines = entry_points
-                    .iter()
-                    .map(|entry_point| ComputePipeline {
-                        name: entry_point.name.clone(),
-                        workgroup_size: entry_point.workgroup_size,
-                        workgroup_count: source
-                            .workgroup_count
-                            .get(&entry_point.name)
-                            .map(|t| t.clone()),
-                        dispatch_count: *source.dispatch_count.get(&entry_point.name).unwrap_or(&1),
-                        pipeline: self.wgpu.device.create_compute_pipeline(
-                            &wgpu::ComputePipelineDescriptor {
-                                label: None,
-                                layout: Some(&self.compute_pipeline_layout),
-                                module: &compute_shader,
-                                entry_point: &entry_point.name,
-                            },
-                        ),
-                    })
-                    .collect();
-                self.query_set = if !self
-                    .wgpu
+        let re_entry_point = regex!(r"(?s)@compute.*?@workgroup_size\((.*?)\).*?fn\s+(\w+)");
+        let entry_points: Vec<(String, [u32; 3])> = re_entry_point
+            .captures_iter(wgsl)
+            .map(|cap| {
+                let workgroup_size = cap[1]
+                    .split(',')
+                    .map(|s| s.trim().parse().unwrap_or(1))
+                    .collect::<Vec<u32>>();
+                let workgroup_size = [
+                    workgroup_size.get(0).cloned().unwrap_or(1),
+                    workgroup_size.get(1).cloned().unwrap_or(1),
+                    workgroup_size.get(2).cloned().unwrap_or(1),
+                ];
+                (cap[2].to_owned(), workgroup_size)
+            })
+            .collect();
+        let entry_point_names = entry_points.iter().map(|t| t.0.clone()).collect();
+        self.handle_success(entry_point_names);
+        let compute_shader = self
+            .wgpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
+            });
+        self.last_compute_pipelines = Some(take(&mut self.compute_pipelines));
+        self.compute_pipelines = entry_points
+            .iter()
+            .map(|entry_point| ComputePipeline {
+                name: entry_point.0.clone(),
+                workgroup_size: entry_point.1,
+                workgroup_count: source
+                    .workgroup_count
+                    .get(&entry_point.0)
+                    .map(|t| t.clone()),
+                dispatch_count: *source.dispatch_count.get(&entry_point.0).unwrap_or(&1),
+                pipeline: self.wgpu.device.create_compute_pipeline(
+                    &wgpu::ComputePipelineDescriptor {
+                        label: None,
+                        layout: Some(&self.compute_pipeline_layout),
+                        module: &compute_shader,
+                        entry_point: &entry_point.0,
+                    },
+                ),
+            })
+            .collect();
+        self.query_set = if !self
+            .wgpu
+            .device
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY)
+        {
+            None
+        } else {
+            Some(
+                self.wgpu
                     .device
-                    .features()
-                    .contains(wgpu::Features::TIMESTAMP_QUERY)
-                {
-                    None
-                } else {
-                    Some(
-                        self.wgpu
-                            .device
-                            .create_query_set(&wgpu::QuerySetDescriptor {
-                                label: None,
-                                count: 2 * self.compute_pipelines.len() as u32,
-                                ty: wgpu::QueryType::Timestamp,
-                            }),
-                    )
-                };
-                log::info!(
-                    "Shader compiled in {}s",
-                    now.elapsed().as_micros() as f32 * 1e-6
-                );
-                self.source = source;
-            }
-            Err(e) => {
-                log::error!("Error parsing WGSL: {e}");
-                if let Some(loc) = e.location(&wgsl) {
-                    let row = loc.line_number as usize;
-                    let col = loc.line_position as usize;
-                    let summary = e.emit_to_string(&wgsl);
-                    let mut n = 0;
-                    if row >= prelude_len {
-                        n = row - prelude_len;
-                    }
-                    if n < source.map.len() {
-                        n = source.map[n];
-                    }
-                    WGSLError::handler(&summary, n, col);
-                }
-            }
-        }
+                    .create_query_set(&wgpu::QuerySetDescriptor {
+                        label: None,
+                        count: 2 * self.compute_pipelines.len() as u32,
+                        ty: wgpu::QueryType::Timestamp,
+                    }),
+            )
+        };
+        log::info!(
+            "Shader compiled in {}s",
+            now.elapsed().as_micros() as f32 * 1e-6
+        );
+        self.source = source;
     }
 
     pub fn set_time_elapsed(&mut self, t: f32) {

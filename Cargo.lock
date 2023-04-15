@@ -3496,7 +3496,6 @@ dependencies = [
  "lazy-regex",
  "lazy_static",
  "log",
- "naga",
  "num",
  "pollster",
  "regex",

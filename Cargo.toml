@@ -62,14 +62,6 @@ git = "https://github.com/gfx-rs/wgpu"
 version = "0.15.0"
 rev = "f3bf0f782e4dfc561d48e758e1f1e04f77860925"
 
-[dependencies.naga]
-version = "0.11.0"
-features = ["wgsl-in"]
-
-[patch.crates-io.naga]
-git = "https://github.com/gfx-rs/naga"
-rev = "f59668ccfaf7bdb3a7e43d84363a21c77357b2fe"
-
 [dependencies.image]
 version = "0.24.2"
 default-features = false
