@@ -465,7 +465,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         let wgsl = &(prelude + &source.source);
         let re_entry_point = regex!(r"(?s)@compute.*?@workgroup_size\((.*?)\).*?fn\s+(\w+)");
         let entry_points: Vec<(String, [u32; 3])> = re_entry_point
-            .captures_iter(wgsl)
+            .captures_iter(&pp::strip_comments(wgsl))
             .map(|cap| {
                 let workgroup_size = cap[1]
                     .split(',')

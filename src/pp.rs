@@ -78,11 +78,16 @@ pub struct Preprocessor {
     enable_strings: bool,
 }
 
-static RE_COMMENT: Lazy<Regex> = lazy_regex!("//.*");
+static RE_COMMENT: Lazy<Regex> = lazy_regex!(r"(//.*|(?s:/\*.*?\*/))");
 static RE_QUOTES: Lazy<Regex> = lazy_regex!(r#""((?:[^\\"]|\\.)*)""#);
 static RE_CHEVRONS: Lazy<Regex> = lazy_regex!("<(.*)>");
+static RE_WORD: Lazy<Regex> = lazy_regex!("[[:word:]]+");
 
 const STRING_MAX_LEN: usize = 20;
+
+pub fn strip_comments(s: &str) -> String {
+    RE_COMMENT.replace_all(s, "").to_string()
+}
 
 impl Preprocessor {
     pub fn new(mut defines: HashMap<String, String>) -> Self {
@@ -97,7 +102,7 @@ impl Preprocessor {
     }
 
     fn subst_defines(&self, source: &str) -> String {
-        regex!("[[:word:]]+")
+        RE_WORD
             .replace_all(source, |caps: &regex::Captures| match &caps[0] {
                 name => self
                     .defines
