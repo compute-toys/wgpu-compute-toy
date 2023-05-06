@@ -13,9 +13,6 @@ const DEPTH_BITS = 16u;
 const dq = float2(0.0, 1.0);
 const eps = 0.01;
 
-alias float3x3 = mat3x3<f32>;
-alias float4x4 = mat4x4<f32>;
-
 struct Camera
 {
   pos: float3,

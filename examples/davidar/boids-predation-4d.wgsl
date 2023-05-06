@@ -35,8 +35,6 @@ fn normz(v: float4) -> float4 {
 // particle rendering code based on "3D atomic rasterizer" by michael0884
 // https://compute.toys/view/21
 
-alias float3x3 = mat3x3<f32>;
-
 struct Camera {
     pos: float3,
     cam: float3x3,

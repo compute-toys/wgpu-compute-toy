@@ -1,7 +1,5 @@
 #storage atomic_storage array<atomic<i32>>
 
-alias float4x4 = mat4x4<f32>;
-
 fn rotXW(t: float) -> float4x4 {
     return float4x4(
         1.0, 0.0, 0.0, 0.0,

@@ -2,9 +2,6 @@
 
 #storage atomic_storage array<atomic<i32>>
 
-alias float3x3 = mat3x3<f32>;
-alias float4x4 = mat4x4<f32>;
-
 struct Camera
 {
   pos: float3,
