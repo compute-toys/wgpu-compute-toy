@@ -527,6 +527,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                     }),
             )
         };
+        self.bindings.user_data.host = source.user_data.clone();
         log::info!(
             "Shader compiled in {}s",
             now.elapsed().as_micros() as f32 * 1e-6
