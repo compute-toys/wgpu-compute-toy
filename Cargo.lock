@@ -3490,6 +3490,7 @@ dependencies = [
  "gloo-net",
  "gloo-utils",
  "image",
+ "indexmap",
  "instant",
  "itertools",
  "js-sys",

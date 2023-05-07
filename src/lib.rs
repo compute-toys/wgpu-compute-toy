@@ -342,10 +342,10 @@ struct DispatchInfo { id: uint }
             s.push_str(": float,\n");
         }
         s.push_str("};\n");
-        s.push_str("struct Data {");
+        s.push_str("struct Data {\n");
         for (key, val) in self.bindings.user_data.host.iter() {
             let n = val.len();
-            s.push_str(&format!("{key}: array<u32,{n}>,"));
+            s.push_str(&format!("    {key}: array<u32,{n}>,\n"));
         }
         s.push_str("};\n");
         s.push_str(&self.bindings.to_wgsl());

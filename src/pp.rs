@@ -46,7 +46,7 @@ pub struct SourceMap {
     #[wasm_bindgen(skip)]
     pub assert_map: Vec<usize>,
     #[wasm_bindgen(skip)]
-    pub user_data: HashMap<String, Vec<u32>>,
+    pub user_data: indexmap::IndexMap<String, Vec<u32>>,
 }
 
 impl SourceMap {
@@ -57,7 +57,7 @@ impl SourceMap {
             workgroup_count: HashMap::new(),
             dispatch_count: HashMap::new(),
             assert_map: vec![],
-            user_data: HashMap::from([("_dummy".into(), vec![0])]),
+            user_data: indexmap::IndexMap::from([("_dummy".into(), vec![0])]),
         }
     }
     fn push_line(&mut self, s: &str, n: usize) {
@@ -217,6 +217,9 @@ impl Preprocessor {
                         .collect()
                     {
                         Ok::<Vec<u32>, _>(mut data) => {
+                            if self.source.user_data.contains_key("_dummy") {
+                                self.source.user_data.clear();
+                            }
                             let name = name.to_string();
                             if let Some(arr) = self.source.user_data.get_mut(&name) {
                                 arr.append(&mut data);
