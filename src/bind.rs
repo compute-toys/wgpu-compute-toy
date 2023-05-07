@@ -2,7 +2,6 @@ use crate::WgpuContext;
 use bitvec::prelude::*;
 use itertools::Itertools;
 use num::Integer;
-use std::collections::HashMap;
 use std::mem::size_of;
 
 const NUM_KEYCODES: usize = 256;
@@ -135,7 +134,7 @@ pub struct Bindings {
     pub mouse: BufferBinding<Mouse>,
     pub keys: BufferBinding<BitArr!(for NUM_KEYCODES, in u8, Lsb0)>,
     pub custom: BufferBinding<(Vec<String>, Vec<f32>)>,
-    pub user_data: BufferBinding<HashMap<String, Vec<u32>>>,
+    pub user_data: BufferBinding<indexmap::IndexMap<String, Vec<u32>>>,
 
     pub storage1: BufferBinding<()>,
     pub storage2: BufferBinding<()>,
@@ -329,7 +328,7 @@ impl Bindings {
                 decl: "var<uniform> custom: Custom".to_string(),
             },
             user_data: BufferBinding {
-                host: HashMap::from([("_dummy".into(), vec![0])]),
+                host: indexmap::IndexMap::from([("_dummy".into(), vec![0])]),
                 serialise: Box::new(|h| {
                     h.iter()
                         .flat_map(|(_, x)| bytemuck::cast_slice(x).iter().copied())
