@@ -8,7 +8,7 @@ pub struct WgpuContext {
     pub device: Arc<wgpu::Device>,
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface,
-    pub surface_format: wgpu::TextureFormat,
+    pub surface_config: wgpu::SurfaceConfiguration,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -76,20 +76,21 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
         .await
         .map_err(|e| e.to_string())?;
 
-    let surface_format = surface.get_capabilities(&adapter).formats[0];
+    let surface_format = preferred_framebuffer_format(&surface.get_capabilities(&adapter).formats);
+    let surface_config = wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format: surface_format,
+        width,
+        height,
+        present_mode: wgpu::PresentMode::Fifo, // vsync
+        alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+        view_formats: vec![
+            surface_format.add_srgb_suffix(),
+            surface_format.remove_srgb_suffix(),
+        ],
+    };
+    surface.configure(&device, &surface_config);
 
-    surface.configure(
-        &device,
-        &wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width,
-            height,
-            present_mode: wgpu::PresentMode::Fifo, // vsync
-            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
-            view_formats: vec![],
-        },
-    );
     log::info!("adapter.limits = {:#?}", adapter.limits());
     Ok(WgpuContext {
         event_loop: Some(event_loop),
@@ -97,6 +98,18 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
         device: Arc::new(device),
         queue,
         surface,
-        surface_format,
+        surface_config,
     })
+}
+
+fn preferred_framebuffer_format(formats: &[wgpu::TextureFormat]) -> wgpu::TextureFormat {
+    for &format in formats {
+        if matches!(
+            format,
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm
+        ) {
+            return format;
+        }
+    }
+    formats[0]
 }

@@ -112,6 +112,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 position.y as f32 / screen_size.height as f32,
             ),
             winit::event::Event::WindowEvent {
+                event: winit::event::WindowEvent::Resized(size),
+                ..
+            } => {
+                if size.width != 0 && size.height != 0 {
+                    wgputoy.resize(size.width, size.height, 1.);
+                }
+            }
+            winit::event::Event::WindowEvent {
                 event: winit::event::WindowEvent::MouseInput { state, .. },
                 ..
             } => wgputoy.set_mouse_click(state == winit::event::ElementState::Pressed),

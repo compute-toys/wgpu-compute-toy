@@ -115,7 +115,7 @@ impl WgpuToyRenderer {
                 &wgpu,
                 &bindings.tex_screen.view(),
                 blit::ColourSpace::Linear,
-                wgpu.surface_format,
+                wgpu.surface_config.format,
                 wgpu::FilterMode::Nearest,
             ),
             wgpu,
@@ -133,8 +133,20 @@ impl WgpuToyRenderer {
 impl WgpuToyRenderer {
     #[cfg(target_arch = "wasm32")]
     pub fn render(&mut self) {
+        use wgpu::SurfaceError;
+
         match self.wgpu.surface.get_current_texture() {
-            Err(e) => log::error!("Unable to get framebuffer: {e}"),
+            Err(err) => match err {
+                SurfaceError::Lost | SurfaceError::Outdated => {
+                    log::error!("Unable to get framebuffer: {err}");
+                    self.wgpu
+                        .surface
+                        .configure(&self.wgpu.device, &self.wgpu.surface_config);
+                    self.wgpu.window.request_redraw();
+                }
+                SurfaceError::OutOfMemory => log::error!("Out of GPU Memory!"),
+                SurfaceError::Timeout => log::warn!("Surface Timeout"),
+            },
             Ok(f) => {
                 let staging_buffer = self.render_to(f);
                 wasm_bindgen_futures::spawn_local(Self::postrender(
@@ -148,8 +160,20 @@ impl WgpuToyRenderer {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn render_async(&mut self) {
+        use wgpu::SurfaceError;
+
         match self.wgpu.surface.get_current_texture() {
-            Err(e) => log::error!("Unable to get framebuffer: {e}"),
+            Err(err) => match err {
+                SurfaceError::Lost | SurfaceError::Outdated => {
+                    log::error!("Unable to get framebuffer: {err}");
+                    self.wgpu
+                        .surface
+                        .configure(&self.wgpu.device, &self.wgpu.surface_config);
+                    self.wgpu.window.request_redraw();
+                }
+                SurfaceError::OutOfMemory => log::error!("Out of GPU Memory!"),
+                SurfaceError::Timeout => log::warn!("Surface Timeout"),
+            },
             Ok(f) => {
                 let staging_buffer = self.render_to(f);
                 Self::postrender(
@@ -578,6 +602,11 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
     pub fn resize(&mut self, width: u32, height: u32, scale: f32) {
         self.screen_width = (width as f32 * scale) as u32;
         self.screen_height = (height as f32 * scale) as u32;
+        self.wgpu.surface_config.width = self.screen_width;
+        self.wgpu.surface_config.height = self.screen_height;
+        self.wgpu
+            .surface
+            .configure(&self.wgpu.device, &self.wgpu.surface_config);
         self.reset();
         self.wgpu
             .window
@@ -601,7 +630,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             &self.wgpu,
             &self.bindings.tex_screen.view(),
             blit::ColourSpace::Linear,
-            self.wgpu.surface_format,
+            self.wgpu.surface_config.format,
             wgpu::FilterMode::Linear,
         );
     }
