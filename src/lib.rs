@@ -608,6 +608,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             .surface
             .configure(&self.wgpu.device, &self.wgpu.surface_config);
         self.reset();
+        #[cfg(target_arch = "wasm32")]
         self.wgpu
             .window
             .set_inner_size(winit::dpi::PhysicalSize::new(width, height));
