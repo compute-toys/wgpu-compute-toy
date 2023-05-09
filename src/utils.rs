@@ -1,8 +1,10 @@
 use crate::WGSLError;
-use cached::proc_macro::cached;
-use std::future::Future;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsValue;
+
+#[cfg(target_arch = "wasm32")]
+use {
+    cached::proc_macro::cached, std::future::Future, wasm_bindgen::prelude::*,
+    wasm_bindgen::JsValue,
+};
 
 pub fn set_panic_hook() {
     // When the `console_error_panic_hook` feature is enabled, we can call the
@@ -48,7 +50,7 @@ pub async fn fetch_include(name: String) -> Option<String> {
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch_include(name: String) -> Option<String> {
     let filename = format!("./include/{name}.wgsl");
-    std::fs::read_to_string(&filename).ok()
+    std::fs::read_to_string(filename).ok()
 }
 
 #[cfg(target_arch = "wasm32")]

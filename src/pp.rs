@@ -106,12 +106,12 @@ impl Preprocessor {
 
     fn subst_defines(&self, source: &str) -> String {
         RE_WORD
-            .replace_all(source, |caps: &regex::Captures| match &caps[0] {
-                name => self
-                    .defines
+            .replace_all(source, |caps: &regex::Captures| {
+                let name = &caps[0];
+                self.defines
                     .get(name)
                     .unwrap_or(&name.to_string())
-                    .to_owned(),
+                    .to_owned()
             })
             .to_string()
     }
@@ -126,9 +126,9 @@ impl Preprocessor {
     #[async_recursion(?Send)]
     async fn process_line(&mut self, line_orig: &str, n: usize) -> Result<(), WGSLError> {
         let mut line = self.subst_defines(line_orig);
-        if line.trim().chars().nth(0) == Some('#') {
+        if line.trim_start().starts_with('#') {
             line = RE_COMMENT.replace(&line, "").to_string();
-            let tokens: Vec<&str> = line.trim().split(" ").collect();
+            let tokens: Vec<&str> = line.trim().split(' ').collect();
             match tokens[..] {
                 ["#include", name] => {
                     let include = match RE_QUOTES.captures(name) {
@@ -151,7 +151,7 @@ impl Preprocessor {
                     };
                     if let Some(code) = include {
                         for line in code.lines() {
-                            self.process_line(&line, n).await?
+                            self.process_line(line, n).await?
                         }
                     } else {
                         return Err(WGSLError::new(format!("Cannot find include {name}"), n));
@@ -171,14 +171,14 @@ impl Preprocessor {
                 ["#define", ..] => {
                     let l = line_orig
                         .trim()
-                        .split(" ")
+                        .split(' ')
                         .nth(1)
                         .ok_or(WGSLError::new(format!("Parse error"), n))?;
                     let r = tokens[2..].join(" ");
                     if self.defines.get(l).is_some() {
                         return Err(WGSLError::new(format!("Cannot redefine {l}"), n));
                     }
-                    self.defines.insert(l.to_string(), r.to_string());
+                    self.defines.insert(l.to_string(), r);
                 }
                 ["#storage", name, ty] => {
                     if self.storage_count >= 2 {
@@ -196,26 +196,21 @@ impl Preprocessor {
                     );
                     self.storage_count += 1;
                 }
-                ["#assert", ..] => {
+                ["#assert", ref counters @ ..] => {
                     if self.assert_count >= NUM_ASSERT_COUNTERS {
                         return Err(WGSLError::new(
                             format!("A maximum of {NUM_ASSERT_COUNTERS} assertions are currently supported"),
                             n,
                         ));
                     }
-                    let pred = tokens[1..].join(" ");
+                    let pred = counters.join(" ");
                     self.source
                         .push_line(&format!("assert({}, {pred});", self.assert_count), n);
                     self.source.assert_map.push(n);
                     self.assert_count += 1;
                 }
-                ["#data", name, "u32", ..] => {
-                    match tokens[3..]
-                        .join("")
-                        .split(",")
-                        .map(|s| parse_u32(s, n))
-                        .collect()
-                    {
+                ["#data", name, "u32", ref data @ ..] => {
+                    match data.join("").split(',').map(|s| parse_u32(s, n)).collect() {
                         Ok::<Vec<u32>, _>(mut data) => {
                             if self.source.user_data.contains_key("_dummy") {
                                 self.source.user_data.clear();
@@ -273,7 +268,7 @@ impl Preprocessor {
     }
 
     pub async fn run(&mut self, shader: &str) -> Option<SourceMap> {
-        match self.preprocess(&shader).await {
+        match self.preprocess(shader).await {
             Ok(()) => Some(std::mem::take(&mut self.source)),
             Err(e) => {
                 e.submit();

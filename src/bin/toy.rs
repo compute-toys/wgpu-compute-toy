@@ -62,7 +62,7 @@ async fn init() -> Result<WgpuToyRenderer, Box<dyn Error>> {
 
         let uniform_names: Vec<String> = metadata.uniforms.iter().map(|u| u.name.clone()).collect();
         let uniform_values: Vec<f32> = metadata.uniforms.iter().map(|u| u.value).collect();
-        if uniform_names.len() > 0 {
+        if !uniform_names.is_empty() {
             wgputoy.set_custom_floats(uniform_names, uniform_values);
         }
 

@@ -50,7 +50,7 @@ impl<H> BufferBinding<H> {
     }
     fn stage(&self, queue: &wgpu::Queue) {
         let data = (self.serialise)(&self.host);
-        if data.len() > 0 {
+        if !data.is_empty() {
             queue.write_buffer(&self.device, 0, &data)
         } else {
             log::warn!("no data to stage")
@@ -162,7 +162,7 @@ impl Drop for Bindings {
 
 fn uniform_buffer_size<T>() -> u64 {
     let size = size_of::<T>() as u64;
-    return size.div_ceil(&16) * 16;
+    size.div_ceil(&16) * 16
 }
 
 impl Bindings {
