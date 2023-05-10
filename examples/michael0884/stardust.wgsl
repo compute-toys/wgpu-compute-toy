@@ -11,8 +11,6 @@ const DEPTH_MIN = 0.2;
 const DEPTH_MAX = 5.0;
 const DEPTH_BITS = 16u;
 
-alias float3x3 = mat3x3<f32>;
-
 struct Camera
 {
   pos: float3,

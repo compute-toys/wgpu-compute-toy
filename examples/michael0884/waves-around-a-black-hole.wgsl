@@ -8,9 +8,6 @@ struct SimData
     data: array<array<array<vec4<f32>, LENGTH>, LENGTH>,2>,
 }
 
-alias float3x3 = mat3x3<f32>;
-alias float4x4 = mat4x4<f32>;
-
 #storage sim SimData
 #define ITERATIONS 32
 #define SIM_FRAME (uint(ITERATIONS)*time.frame+dispatch.id)

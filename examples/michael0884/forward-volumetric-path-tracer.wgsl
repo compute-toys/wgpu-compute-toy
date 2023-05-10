@@ -7,9 +7,6 @@ const TWO_PI = 6.28318530718;
 const STEP = 0.01;
 const LARGENUM = 1e10;
 
-alias float3x3 = mat3x3<f32>;
-alias float2x2 = mat2x2<f32>;
-
 alias distanceArr = array<float,8>;
 
 struct Camera

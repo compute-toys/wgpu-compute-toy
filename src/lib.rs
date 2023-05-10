@@ -347,8 +347,15 @@ impl WgpuToyRenderer {
         let mut s = String::new();
         for (a, t) in [("int", "i32"), ("uint", "u32"), ("float", "f32")] {
             s.push_str(&format!("alias {a} = {t};\n"));
-            for n in [2, 3, 4] {
+        }
+        for (a, t) in [("int", "i32"), ("uint", "u32"), ("float", "f32"), ("bool", "bool")] {
+            for n in 2..5 {
                 s.push_str(&format!("alias {a}{n} = vec{n}<{t}>;\n"));
+            }
+        }
+        for n in 2..5 {
+            for m in 2..5 {
+                s.push_str(&format!("alias float{n}x{m} = mat{n}x{m}<f32>;\n"));
             }
         }
         s.push_str(
