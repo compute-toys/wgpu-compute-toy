@@ -14,11 +14,4 @@ cargo run examples/davidar/buddhabrot.wgsl
 
 ## Web
 
-[Install wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
-and run `wasm-pack build`.
-
-The following command can be used to quickly recompile while the [compute.toys](https://github.com/compute-toys/compute.toys) server is running:
-
-```
-wasm-pack build --dev && cp -rv pkg/. ../compute.toys/lib/wgputoy/
-```
+See https://github.com/compute-toys/compute.toys
