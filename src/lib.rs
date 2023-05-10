@@ -13,9 +13,6 @@ use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-use std::future::Future;
-
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
 #[cfg(feature = "wee_alloc")]
