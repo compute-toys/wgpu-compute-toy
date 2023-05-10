@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use crate::utils::set_panic_hook;
-
 pub struct WgpuContext {
     pub event_loop: Option<winit::event_loop::EventLoop<()>>,
     pub window: winit::window::Window,
@@ -17,6 +15,7 @@ fn init_window(
     event_loop: &winit::event_loop::EventLoop<()>,
     bind_id: &str,
 ) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
+    use crate::utils::set_panic_hook;
     console_log::init(); // FIXME only do this once
     set_panic_hook();
     let win = web_sys::window().ok_or("window is None")?;
@@ -60,7 +59,10 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
     let event_loop = winit::event_loop::EventLoop::new();
     let window = init_window(size, &event_loop, bind_id).map_err(|e| e.to_string())?;
 
-    let instance = wgpu::Instance::default();
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::PRIMARY,
+        dx12_shader_compiler: wgpu::Dx12Compiler::Fxc,
+    });
     let surface = unsafe { instance.create_surface(&window) }.map_err(|e| e.to_string())?;
 
     let adapter = instance
@@ -72,7 +74,14 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
         .await
         .ok_or("unable to create adapter")?;
     let (device, queue) = adapter
-        .request_device(&Default::default(), None)
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("GPU Device"),
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
+            },
+            None,
+        )
         .await
         .map_err(|e| e.to_string())?;
 

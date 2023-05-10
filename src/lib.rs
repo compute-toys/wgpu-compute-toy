@@ -9,7 +9,6 @@ use lazy_regex::regex;
 use num::Integer;
 use pp::{SourceMap, WGSLError};
 use std::collections::HashMap;
-use std::future::Future;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
@@ -113,7 +112,7 @@ impl WgpuToyRenderer {
             screen_height: size.height,
             screen_blitter: blit::Blitter::new(
                 &wgpu,
-                &bindings.tex_screen.view(),
+                bindings.tex_screen.view(),
                 blit::ColourSpace::Linear,
                 wgpu.surface_config.format,
                 wgpu::FilterMode::Nearest,
@@ -192,7 +191,7 @@ impl WgpuToyRenderer {
         if self.bindings.time.host.frame % STATS_PERIOD == 0 {
             //encoder.clear_buffer(&self.uniforms.debug_buffer, 0, None); // not yet implemented in web backend
             self.wgpu.queue.write_buffer(
-                &self.bindings.debug_buffer.buffer(),
+                self.bindings.debug_buffer.buffer(),
                 0,
                 bytemuck::bytes_of(&[0u32; bind::NUM_ASSERT_COUNTERS]),
             );
@@ -225,7 +224,7 @@ impl WgpuToyRenderer {
                 ]);
                 compute_pass.set_pipeline(&p.pipeline);
                 self.wgpu.queue.write_buffer(
-                    &self.bindings.dispatch_info.buffer(),
+                    self.bindings.dispatch_info.buffer(),
                     bind::OFFSET_ALIGNMENT as u64 * dispatch_counter,
                     bytemuck::bytes_of(&i),
                 );
@@ -246,13 +245,13 @@ impl WgpuToyRenderer {
                 drop(compute_pass);
                 encoder.copy_texture_to_texture(
                     wgpu::ImageCopyTexture {
-                        texture: &self.bindings.tex_write.texture(),
+                        texture: self.bindings.tex_write.texture(),
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
                     wgpu::ImageCopyTexture {
-                        texture: &self.bindings.tex_read.texture(),
+                        texture: self.bindings.tex_read.texture(),
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
@@ -275,7 +274,7 @@ impl WgpuToyRenderer {
                 mapped_at_creation: false,
             });
             encoder.copy_buffer_to_buffer(
-                &self.bindings.debug_buffer.buffer(),
+                self.bindings.debug_buffer.buffer(),
                 0,
                 &buf,
                 0,
@@ -291,55 +290,52 @@ impl WgpuToyRenderer {
             }
             staging_buffer = Some(buf);
         }
-        self.bindings.time.host.frame += 1;
+        self.bindings.time.host.frame = self.bindings.time.host.frame.wrapping_add(1);
         self.screen_blitter.blit(
             &mut encoder,
             &frame.texture.create_view(&Default::default()),
         );
         self.wgpu.queue.submit(Some(encoder.finish()));
-        self.wgpu.device.poll(wgpu::Maintain::Wait);
         frame.present();
         staging_buffer
     }
 
-    fn postrender(
+    async fn postrender(
         staging_buffer: Option<wgpu::Buffer>,
         numthreads: u32,
         assert_map: Vec<usize>,
-    ) -> impl Future<Output = ()> + 'static {
-        async move {
-            if let Some(buf) = staging_buffer {
-                let buffer_slice = buf.slice(..);
-                let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-                buffer_slice.map_async(wgpu::MapMode::Read, move |v| match sender.send(v) {
-                    Ok(()) => {}
-                    Err(_) => log::error!("Channel closed unexpectedly"),
-                });
-                match receiver.receive().await {
-                    None => log::error!("Channel closed unexpectedly"),
-                    Some(Err(e)) => log::error!("{e}"),
-                    Some(Ok(())) => {
-                        let data = buffer_slice.get_mapped_range();
-                        let assertions: &[u32] = bytemuck::cast_slice(&data[0..ASSERTS_SIZE]);
-                        let timestamps: &[u64] = bytemuck::cast_slice(&data[ASSERTS_SIZE..]);
-                        for (i, count) in assertions.iter().enumerate() {
-                            if count > &0 {
-                                let percent =
-                                    *count as f32 / (numthreads * STATS_PERIOD) as f32 * 100.0;
-                                log::warn!("Assertion {i} failed in {percent}% of threads");
-                                if i < assert_map.len() {
-                                    WGSLError::handler(
-                                        &format!("Assertion failed in {percent}% of threads"),
-                                        assert_map[i],
-                                        0,
-                                    );
-                                }
+    ) {
+        if let Some(buf) = staging_buffer {
+            let buffer_slice = buf.slice(..);
+            let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+            buffer_slice.map_async(wgpu::MapMode::Read, move |v| match sender.send(v) {
+                Ok(()) => {}
+                Err(_) => log::error!("Channel closed unexpectedly"),
+            });
+            match receiver.receive().await {
+                None => log::error!("Channel closed unexpectedly"),
+                Some(Err(e)) => log::error!("{e}"),
+                Some(Ok(())) => {
+                    let data = buffer_slice.get_mapped_range();
+                    let assertions: &[u32] = bytemuck::cast_slice(&data[0..ASSERTS_SIZE]);
+                    let timestamps: &[u64] = bytemuck::cast_slice(&data[ASSERTS_SIZE..]);
+                    for (i, count) in assertions.iter().enumerate() {
+                        if count > &0 {
+                            let percent =
+                                *count as f32 / (numthreads * STATS_PERIOD) as f32 * 100.0;
+                            log::warn!("Assertion {i} failed in {percent}% of threads");
+                            if i < assert_map.len() {
+                                WGSLError::handler(
+                                    &format!("Assertion failed in {percent}% of threads"),
+                                    assert_map[i],
+                                    0,
+                                );
                             }
                         }
                     }
                 }
-                buf.unmap();
             }
+            buf.unmap();
         }
     }
 
@@ -424,8 +420,8 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
 "#,
             );
         }
-        s.push_str("}");
-        return s;
+        s.push('}');
+        s
     }
 
     fn handle_success(&self, entry_points: Vec<String>) {
@@ -498,15 +494,10 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         let entry_points: Vec<(String, [u32; 3])> = re_entry_point
             .captures_iter(&pp::strip_comments(wgsl))
             .map(|cap| {
-                let workgroup_size = cap[1]
-                    .split(',')
-                    .map(|s| s.trim().parse().unwrap_or(1))
-                    .collect::<Vec<u32>>();
-                let workgroup_size = [
-                    workgroup_size.get(0).cloned().unwrap_or(1),
-                    workgroup_size.get(1).cloned().unwrap_or(1),
-                    workgroup_size.get(2).cloned().unwrap_or(1),
-                ];
+                // TODO: Handle error if failed to parse the capture
+                let mut sizes = cap[1].split(',').map(|s| s.trim().parse().unwrap_or(1));
+                let workgroup_size: [u32; 3] = std::array::from_fn(|_| sizes.next().unwrap_or(1));
+
                 (cap[2].to_owned(), workgroup_size)
             })
             .collect();
@@ -517,7 +508,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&wgsl)),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl)),
             });
         self.last_compute_pipelines = Some(take(&mut self.compute_pipelines));
         self.compute_pipelines = entry_points
@@ -525,10 +516,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             .map(|entry_point| ComputePipeline {
                 name: entry_point.0.clone(),
                 workgroup_size: entry_point.1,
-                workgroup_count: source
-                    .workgroup_count
-                    .get(&entry_point.0)
-                    .map(|t| t.clone()),
+                workgroup_count: source.workgroup_count.get(&entry_point.0).cloned(),
                 dispatch_count: *source.dispatch_count.get(&entry_point.0).unwrap_or(&1),
                 pipeline: self.wgpu.device.create_compute_pipeline(
                     &wgpu::ComputePipelineDescriptor {
@@ -636,7 +624,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu);
         self.screen_blitter = blit::Blitter::new(
             &self.wgpu,
-            &self.bindings.tex_screen.view(),
+            self.bindings.tex_screen.view(),
             blit::ColourSpace::Linear,
             self.wgpu.surface_config.format,
             wgpu::FilterMode::Linear,
