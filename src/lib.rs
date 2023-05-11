@@ -100,16 +100,15 @@ pub async fn create_renderer(
 
 impl WgpuToyRenderer {
     pub fn new(wgpu: WgpuContext) -> WgpuToyRenderer {
-        let size = wgpu.window.inner_size();
-        let bindings = bind::Bindings::new(&wgpu, size.width, size.height, false);
+        let bindings = bind::Bindings::new(&wgpu, wgpu.surface_config.width, wgpu.surface_config.height, false);
 
         WgpuToyRenderer {
             compute_pipeline_layout: bindings.create_pipeline_layout(&wgpu),
             compute_bind_group: bindings.create_bind_group(&wgpu),
             last_compute_pipelines: None,
             compute_pipelines: vec![],
-            screen_width: size.width,
-            screen_height: size.height,
+            screen_width: wgpu.surface_config.width,
+            screen_height: wgpu.surface_config.height,
             screen_blitter: blit::Blitter::new(
                 &wgpu,
                 bindings.tex_screen.view(),
@@ -141,7 +140,6 @@ impl WgpuToyRenderer {
                     self.wgpu
                         .surface
                         .configure(&self.wgpu.device, &self.wgpu.surface_config);
-                    self.wgpu.window.request_redraw();
                 }
                 SurfaceError::OutOfMemory => log::error!("Out of GPU Memory!"),
                 SurfaceError::Timeout => log::warn!("Surface Timeout"),
@@ -603,10 +601,6 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             .surface
             .configure(&self.wgpu.device, &self.wgpu.surface_config);
         self.reset();
-        #[cfg(target_arch = "wasm32")]
-        self.wgpu
-            .window
-            .set_inner_size(winit::dpi::PhysicalSize::new(width, height));
     }
 
     pub fn reset(&mut self) {

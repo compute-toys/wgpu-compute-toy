@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 pub struct WgpuContext {
     pub event_loop: Option<winit::event_loop::EventLoop<()>>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub window: winit::window::Window,
     pub device: Arc<wgpu::Device>,
     pub queue: wgpu::Queue,
@@ -103,6 +104,7 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
     log::info!("adapter.limits = {:#?}", adapter.limits());
     Ok(WgpuContext {
         event_loop: Some(event_loop),
+        #[cfg(not(target_arch = "wasm32"))]
         window,
         device: Arc::new(device),
         queue,
