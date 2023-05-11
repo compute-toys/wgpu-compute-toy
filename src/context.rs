@@ -1,6 +1,13 @@
 use std::sync::Arc;
 
+#[cfg(target_arch = "wasm32")]
+use raw_window_handle::{
+    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle, WebDisplayHandle,
+    WebWindowHandle,
+};
+
 pub struct WgpuContext {
+    #[cfg(not(target_arch = "wasm32"))]
     pub event_loop: Option<winit::event_loop::EventLoop<()>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub window: winit::window::Window,
@@ -11,11 +18,28 @@ pub struct WgpuContext {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn init_window(
-    size: winit::dpi::Size,
-    event_loop: &winit::event_loop::EventLoop<()>,
-    bind_id: &str,
-) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
+struct CanvasWindow {
+    id: u32,
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe impl HasRawWindowHandle for CanvasWindow {
+    fn raw_window_handle(&self) -> RawWindowHandle {
+        let mut window_handle = WebWindowHandle::empty();
+        window_handle.id = self.id;
+        RawWindowHandle::Web(window_handle)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe impl HasRawDisplayHandle for CanvasWindow {
+    fn raw_display_handle(&self) -> RawDisplayHandle {
+        RawDisplayHandle::Web(WebDisplayHandle::empty())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn init_window(bind_id: &str) -> Result<CanvasWindow, Box<dyn std::error::Error>> {
     use crate::utils::set_panic_hook;
     console_log::init(); // FIXME only do this once
     set_panic_hook();
@@ -32,19 +56,16 @@ fn init_window(
         .get_context("webgpu")
         .or(Err("no webgpu"))?
         .ok_or("no webgpu")?;
-    use winit::platform::web::WindowBuilderExtWebSys;
-    let window = winit::window::WindowBuilder::new()
-        .with_inner_size(size)
-        .with_canvas(Some(canvas))
-        .build(event_loop)?;
-    Ok(window)
+    canvas
+        .set_attribute("data-raw-handle", "42")
+        .or(Err("cannot set attribute"))?;
+    Ok(CanvasWindow { id: 42 })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn init_window(
     size: winit::dpi::Size,
     event_loop: &winit::event_loop::EventLoop<()>,
-    _: &str,
 ) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
     env_logger::init_from_env(
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
@@ -56,9 +77,17 @@ fn init_window(
 }
 
 pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuContext, String> {
-    let size = winit::dpi::Size::Physical(winit::dpi::PhysicalSize::new(width, height));
+    #[cfg(not(target_arch = "wasm32"))]
     let event_loop = winit::event_loop::EventLoop::new();
-    let window = init_window(size, &event_loop, bind_id).map_err(|e| e.to_string())?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let window = init_window(
+        winit::dpi::Size::Physical(winit::dpi::PhysicalSize::new(width, height)),
+        &event_loop,
+    )
+    .map_err(|e| e.to_string())?;
+
+    #[cfg(target_arch = "wasm32")]
+    let window = init_window(bind_id).map_err(|e| e.to_string())?;
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
@@ -103,6 +132,7 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
 
     log::info!("adapter.limits = {:#?}", adapter.limits());
     Ok(WgpuContext {
+        #[cfg(not(target_arch = "wasm32"))]
         event_loop: Some(event_loop),
         #[cfg(not(target_arch = "wasm32"))]
         window,

@@ -14,7 +14,6 @@ default = ["console_error_panic_hook"]
 wasm-bindgen = "0.2.84"
 wasm-bindgen-futures = "0.4.31"
 
-winit = "0.28.5"
 pollster = "0.3.0"
 bytemuck = { version = "1.9.1", features = ["derive"] }
 log = "0.4.17"
@@ -49,6 +48,7 @@ js-sys = "0.3.57"
 web-sys = "0.3.57"
 gloo-utils = "0.1.4"
 gloo-net = "0.2.1"
+raw-window-handle = "0.5.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = "0.11.16"
@@ -57,6 +57,7 @@ reqwest-middleware-cache = "0.1"
 tokio = { version = "1.27.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+winit = "0.28.5"
 
 [dependencies.wgpu]
 version = "0.16.0"

@@ -100,7 +100,12 @@ pub async fn create_renderer(
 
 impl WgpuToyRenderer {
     pub fn new(wgpu: WgpuContext) -> WgpuToyRenderer {
-        let bindings = bind::Bindings::new(&wgpu, wgpu.surface_config.width, wgpu.surface_config.height, false);
+        let bindings = bind::Bindings::new(
+            &wgpu,
+            wgpu.surface_config.width,
+            wgpu.surface_config.height,
+            false,
+        );
 
         WgpuToyRenderer {
             compute_pipeline_layout: bindings.create_pipeline_layout(&wgpu),
@@ -342,7 +347,12 @@ impl WgpuToyRenderer {
         for (a, t) in [("int", "i32"), ("uint", "u32"), ("float", "f32")] {
             s.push_str(&format!("alias {a} = {t};\n"));
         }
-        for (a, t) in [("int", "i32"), ("uint", "u32"), ("float", "f32"), ("bool", "bool")] {
+        for (a, t) in [
+            ("int", "i32"),
+            ("uint", "u32"),
+            ("float", "f32"),
+            ("bool", "bool"),
+        ] {
             for n in 2..5 {
                 s.push_str(&format!("alias {a}{n} = vec{n}<{t}>;\n"));
             }
