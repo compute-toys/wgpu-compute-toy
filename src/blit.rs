@@ -1,148 +1,158 @@
+use std::{cell::RefCell, collections::HashMap};
+
+use wgpu::util::DeviceExt;
+
 use crate::context::WgpuContext;
 
-#[derive(Copy, Clone, Debug)]
-pub enum ColourSpace {
-    Linear,
-    Rgbe,
-}
-
 pub struct Blitter {
-    render_pipeline: wgpu::RenderPipeline,
-    render_bind_group: wgpu::BindGroup,
-    dest_format: wgpu::TextureFormat,
+    pipelines: RefCell<HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>>,
+    shader: wgpu::ShaderModule,
+    bind_group_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
 }
 
 impl Blitter {
-    pub fn new(
-        wgpu: &WgpuContext,
-        src: &wgpu::TextureView,
-        src_space: ColourSpace,
-        dest_format: wgpu::TextureFormat,
-        filter: wgpu::FilterMode,
-    ) -> Self {
-        let render_shader = wgpu
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
-            });
-        let filterable = filter == wgpu::FilterMode::Linear;
-        let render_bind_group_layout =
-            wgpu.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: None,
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                multisampled: false,
-                                sample_type: wgpu::TextureSampleType::Float { filterable },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(if filterable {
-                                wgpu::SamplerBindingType::Filtering
-                            } else {
-                                wgpu::SamplerBindingType::NonFiltering
-                            }),
-                            count: None,
-                        },
-                    ],
-                });
-        Blitter {
-            render_bind_group: wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &render_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(src) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
-                        min_filter: filter,
-                        mag_filter: filter,
-                        ..Default::default()
-                    })) },
-                ],
-            }),
-            render_pipeline: wgpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: Some(&wgpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: None,
-                    bind_group_layouts: &[&render_bind_group_layout],
-                    push_constant_ranges: &[],
-                })),
-                vertex: wgpu::VertexState {
-                    module: &render_shader,
-                    entry_point: "vs_main",
-                    buffers: &[],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &render_shader,
-                    entry_point: match (src_space, dest_format) {
-                        // FIXME use sRGB viewFormats instead once the API stabilises
-                        (ColourSpace::Linear, wgpu::TextureFormat::Bgra8Unorm) => "fs_main_linear_to_srgb",
-                        (ColourSpace::Linear, wgpu::TextureFormat::Rgba8Unorm) => "fs_main_linear_to_srgb",
-                        (ColourSpace::Linear, wgpu::TextureFormat::Bgra8UnormSrgb) => "fs_main", // format automatically performs sRGB encoding
-                        (ColourSpace::Linear, wgpu::TextureFormat::Rgba8UnormSrgb) => "fs_main",
-                        (ColourSpace::Linear, wgpu::TextureFormat::Rgba16Float) => "fs_main",
-                        (ColourSpace::Rgbe, wgpu::TextureFormat::Rgba16Float) => "fs_main_rgbe_to_linear",
-                        _ => panic!("Blitter: unrecognised conversion from {src_space:?} to {dest_format:?}")
+    pub fn new(device: &wgpu::Device) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Blit Shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!("blit.wgsl"))),
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Blit Sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Blit Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    targets: &[Some(dest_format.into())],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            }),
-            dest_format,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipelines = RefCell::new(HashMap::from([(
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            Self::create_pipeline(device, &shader, wgpu::TextureFormat::Bgra8UnormSrgb),
+        )]));
+
+        Self {
+            pipelines,
+            shader,
+            bind_group_layout,
+            sampler,
         }
     }
 
-    pub fn blit(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    pub fn blit_to_texture(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        device: &wgpu::Device,
+        src_texture: &wgpu::TextureView,
+        dst_texture: &wgpu::TextureView,
+        dst_format: wgpu::TextureFormat,
+    ) {
+        let mut pipelines = self.pipelines.borrow_mut();
+        let pipeline = pipelines
+            .entry(dst_format)
+            .or_insert_with_key(|&format| Self::create_pipeline(device, &self.shader, format));
+
+        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(src_texture),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Blit Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
+                view: dst_texture,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
                     store: true,
                 },
             })],
             depth_stencil_attachment: None,
         });
-        render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.render_bind_group, &[]);
+
+        render_pass.set_pipeline(pipeline);
+        render_pass.set_bind_group(0, &texture_bind_group, &[]);
         render_pass.draw(0..3, 0..1);
     }
 
-    pub fn create_texture(
+    pub fn create_texture_with_mipmaps(
         &self,
         wgpu: &WgpuContext,
         width: u32,
         height: u32,
-        mip_level_count: u32,
+        format: wgpu::TextureFormat,
+        data: &[u8],
     ) -> wgpu::Texture {
-        let texture = wgpu.device.create_texture(&wgpu::TextureDescriptor {
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let mip_level_count = size.max_mips(wgpu::TextureDimension::D2);
+
+        let texture = wgpu.device.create_texture_with_data(
+            &wgpu.queue,
+            &wgpu::TextureDescriptor {
+                size,
+                mip_level_count,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                label: None,
+                view_formats: &[format.add_srgb_suffix(), format.remove_srgb_suffix()],
             },
-            mip_level_count,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.dest_format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            label: None,
-            view_formats: &[],
-        });
+            data,
+        );
+
         let mut encoder = wgpu.device.create_command_encoder(&Default::default());
-        let views: Vec<wgpu::TextureView> = (0..mip_level_count)
+        self.generate_mipmaps(&mut encoder, &wgpu.device, &texture);
+        wgpu.queue.submit(Some(encoder.finish()));
+
+        texture
+    }
+
+    pub fn generate_mipmaps(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        device: &wgpu::Device,
+        texture: &wgpu::Texture,
+    ) {
+        let mip_count = texture.mip_level_count();
+
+        let views: Vec<_> = (0..mip_count)
             .map(|base_mip_level| {
                 texture.create_view(&wgpu::TextureViewDescriptor {
                     base_mip_level,
@@ -151,18 +161,37 @@ impl Blitter {
                 })
             })
             .collect();
-        self.blit(&mut encoder, &views[0]);
-        for target_mip in 1..mip_level_count as usize {
-            Blitter::new(
-                wgpu,
-                &views[target_mip - 1],
-                ColourSpace::Linear,
-                self.dest_format,
-                wgpu::FilterMode::Linear,
-            )
-            .blit(&mut encoder, &views[target_mip]);
+
+        for (src_view, dst_view) in views.iter().zip(views.iter().skip(1)) {
+            self.blit_to_texture(encoder, device, src_view, dst_view, texture.format());
         }
-        wgpu.queue.submit(Some(encoder.finish()));
-        texture
+    }
+
+    fn create_pipeline(
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Blit Pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_main",
+                targets: &[Some(format.into())],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: None,
+            multiview: None,
+        })
     }
 }

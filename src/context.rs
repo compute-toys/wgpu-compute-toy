@@ -147,7 +147,7 @@ fn preferred_framebuffer_format(formats: &[wgpu::TextureFormat]) -> wgpu::Textur
     for &format in formats {
         if matches!(
             format,
-            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm
+            wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb
         ) {
             return format;
         }
