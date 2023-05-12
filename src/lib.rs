@@ -12,10 +12,7 @@ use std::collections::HashMap;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
-<<<<<<< HEAD
-=======
 use wgpu::util::DeviceExt;
->>>>>>> 2fff1ec (Initial api draft)
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
