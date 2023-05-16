@@ -106,10 +106,11 @@ impl WgpuToyRenderer {
             wgpu.surface_config.height,
             false,
         );
+        let layout = bindings.create_bind_group_layout(&wgpu);
 
         WgpuToyRenderer {
-            compute_pipeline_layout: bindings.create_pipeline_layout(&wgpu),
-            compute_bind_group: bindings.create_bind_group(&wgpu),
+            compute_pipeline_layout: bindings.create_pipeline_layout(&wgpu, &layout),
+            compute_bind_group: bindings.create_bind_group(&wgpu, &layout),
             last_compute_pipelines: None,
             compute_pipelines: vec![],
             screen_width: wgpu.surface_config.width,
@@ -624,8 +625,9 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         self.bindings.custom.host = bindings.custom.host.clone();
         self.bindings.user_data.host = bindings.user_data.host.clone();
         self.bindings.channels = take(&mut bindings.channels);
-        self.compute_pipeline_layout = self.bindings.create_pipeline_layout(&self.wgpu);
-        self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu);
+        let layout = self.bindings.create_bind_group_layout(&self.wgpu);
+        self.compute_pipeline_layout = self.bindings.create_pipeline_layout(&self.wgpu, &layout);
+        self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu, &layout);
         self.screen_blitter = blit::Blitter::new(
             &self.wgpu,
             self.bindings.tex_screen.view(),

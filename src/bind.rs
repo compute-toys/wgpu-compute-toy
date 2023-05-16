@@ -545,7 +545,7 @@ impl Bindings {
         ]
     }
 
-    fn create_bind_group_layout(&self, wgpu: &WgpuContext) -> wgpu::BindGroupLayout {
+    pub fn create_bind_group_layout(&self, wgpu: &WgpuContext) -> wgpu::BindGroupLayout {
         wgpu.device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: None,
@@ -563,19 +563,19 @@ impl Bindings {
             })
     }
 
-    pub fn create_pipeline_layout(&self, wgpu: &WgpuContext) -> wgpu::PipelineLayout {
+    pub fn create_pipeline_layout(&self, wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout) -> wgpu::PipelineLayout {
         wgpu.device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[&self.create_bind_group_layout(wgpu)],
+                bind_group_layouts: &[layout],
                 push_constant_ranges: &[],
             })
     }
 
-    pub fn create_bind_group(&self, wgpu: &WgpuContext) -> wgpu::BindGroup {
+    pub fn create_bind_group(&self, wgpu: &WgpuContext, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroup {
         wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout: &self.create_bind_group_layout(wgpu),
+            layout,
             entries: &self
                 .to_vec()
                 .iter()
