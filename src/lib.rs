@@ -69,6 +69,7 @@ pub struct WgpuToyRenderer {
     last_compute_pipelines: Option<Vec<ComputePipeline>>,
     compute_pipelines: Vec<ComputePipeline>,
     compute_bind_group: wgpu::BindGroup,
+    compute_bind_group_layout: wgpu::BindGroupLayout,
     on_success_cb: SuccessCallback,
     pass_f32: bool,
     screen_blitter: blit::Blitter,
@@ -111,6 +112,7 @@ impl WgpuToyRenderer {
         WgpuToyRenderer {
             compute_pipeline_layout: bindings.create_pipeline_layout(&wgpu, &layout),
             compute_bind_group: bindings.create_bind_group(&wgpu, &layout),
+            compute_bind_group_layout: layout,
             last_compute_pipelines: None,
             compute_pipelines: vec![],
             screen_width: wgpu.surface_config.width,
@@ -628,6 +630,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         let layout = self.bindings.create_bind_group_layout(&self.wgpu);
         self.compute_pipeline_layout = self.bindings.create_pipeline_layout(&self.wgpu, &layout);
         self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu, &layout);
+        self.compute_bind_group_layout = layout;
         self.screen_blitter = blit::Blitter::new(
             &self.wgpu,
             self.bindings.tex_screen.view(),
@@ -671,7 +674,9 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                         1 + (std::cmp::max(width, height) as f32).log2() as u32,
                     ),
                 );
-                self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu);
+                self.compute_bind_group = self
+                    .bindings
+                    .create_bind_group(&self.wgpu, &self.compute_bind_group_layout);
             }
         }
         log::info!("Channel {index} loaded in {}s", now.elapsed().as_secs_f32());
@@ -708,7 +713,9 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                 1 + (std::cmp::max(meta.width, meta.height) as f32).log2() as u32,
             ),
         );
-        self.compute_bind_group = self.bindings.create_bind_group(&self.wgpu);
+        self.compute_bind_group = self
+            .bindings
+            .create_bind_group(&self.wgpu, &self.compute_bind_group_layout);
         log::info!("Channel {index} loaded in {}s", now.elapsed().as_secs_f32());
         Ok(())
     }
