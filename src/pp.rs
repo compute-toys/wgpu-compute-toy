@@ -1,7 +1,4 @@
-use crate::{
-    bind::NUM_ASSERT_COUNTERS,
-    utils::{fetch_include, parse_u32},
-};
+use crate::{bind::NUM_ASSERT_COUNTERS, utils::{parse_u32, fetch_include}};
 use async_recursion::async_recursion;
 use itertools::Itertools;
 use lazy_regex::*;
@@ -144,7 +141,7 @@ impl Preprocessor {
                                 if path == "string" {
                                     self.enable_strings = true;
                                 }
-                                fetch_include(format!("std/{path}")).await
+                                fetch_include(path.to_string()).await
                             }
                         },
                         Some(cap) => fetch_include(cap[1].to_string()).await,

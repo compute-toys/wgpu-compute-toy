@@ -2,6 +2,8 @@ mod bind;
 mod blit;
 pub mod context;
 mod pp;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod shader;
 mod utils;
 
 #[cfg(feature = "winit")]
@@ -10,6 +12,8 @@ use context::WgpuContext;
 use lazy_regex::regex;
 use num::Integer;
 use pp::{SourceMap, WGSLError};
+#[cfg(not(target_arch = "wasm32"))]
+use shader::Shader;
 use std::collections::HashMap;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -735,6 +739,32 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             .bindings
             .create_bind_group(&self.wgpu, &self.compute_bind_group_layout);
         log::info!("Channel {index} loaded in {}s", now.elapsed().as_secs_f32());
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn load_shader(&mut self, shader: Shader) -> Result<(), String> {
+        for (i, texture) in shader.textures.iter().enumerate() {
+            if texture.img.ends_with(".hdr") {
+                self.load_channel_hdr(i, &texture.data)?;
+            } else {
+                self.load_channel(i, &texture.data);
+            }
+        }
+
+        let meta = shader.meta;
+        let uniform_names: Vec<String> = meta.uniforms.iter().map(|u| u.name.clone()).collect();
+        let uniform_values: Vec<f32> = meta.uniforms.iter().map(|u| u.value).collect();
+        if !uniform_names.is_empty() {
+            self.set_custom_floats(uniform_names, uniform_values);
+        }
+
+        self.set_pass_f32(meta.float32_enabled);
+
+        if let Some(source) = self.preprocess_async(&shader.shader).await {
+            self.compile(source);
+        }
+
         Ok(())
     }
 }
