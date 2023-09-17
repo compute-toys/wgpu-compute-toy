@@ -10,11 +10,11 @@ use context::WgpuContext;
 use lazy_regex::regex;
 use num::Integer;
 use pp::{SourceMap, WGSLError};
-use wgpu::{Maintain, SubmissionIndex};
 use std::collections::HashMap;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
+use wgpu::{Maintain, SubmissionIndex};
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -198,7 +198,18 @@ impl WgpuToyRenderer {
         }
     }
 
-    pub fn render_to(&mut self, frame: &wgpu::SurfaceTexture) -> (Option<wgpu::Buffer>, SubmissionIndex) {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn render_to_surface(
+        &mut self,
+        frame: &wgpu::SurfaceTexture,
+    ) -> (Option<wgpu::Buffer>, SubmissionIndex) {
+        self.render_to(frame)
+    }
+
+    fn render_to(
+        &mut self,
+        frame: &wgpu::SurfaceTexture,
+    ) -> (Option<wgpu::Buffer>, SubmissionIndex) {
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
         self.bindings.stage(&self.wgpu.queue);
         if self.bindings.time.host.frame % STATS_PERIOD == 0 {
