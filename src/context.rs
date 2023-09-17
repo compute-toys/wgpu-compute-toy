@@ -7,9 +7,9 @@ use raw_window_handle::{
 };
 
 pub struct WgpuContext {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
     pub event_loop: Option<winit::event_loop::EventLoop<()>>,
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
     pub window: winit::window::Window,
     pub device: Arc<wgpu::Device>,
     pub queue: wgpu::Queue,
@@ -62,7 +62,7 @@ fn init_window(bind_id: &str) -> Result<CanvasWindow, Box<dyn std::error::Error>
     Ok(CanvasWindow { id: 42 })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
 fn init_window(
     size: winit::dpi::Size,
     event_loop: &winit::event_loop::EventLoop<()>,
@@ -76,6 +76,7 @@ fn init_window(
     Ok(window)
 }
 
+#[cfg(feature = "winit")]
 pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuContext, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let event_loop = winit::event_loop::EventLoop::new();
@@ -132,9 +133,9 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
 
     log::info!("adapter.limits = {:#?}", adapter.limits());
     Ok(WgpuContext {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
         event_loop: Some(event_loop),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
         window,
         device: Arc::new(device),
         queue,

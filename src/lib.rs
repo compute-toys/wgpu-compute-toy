@@ -4,7 +4,9 @@ pub mod context;
 mod pp;
 mod utils;
 
-use context::{init_wgpu, WgpuContext};
+#[cfg(feature = "winit")]
+use context::init_wgpu;
+use context::WgpuContext;
 use lazy_regex::regex;
 use num::Integer;
 use pp::{SourceMap, WGSLError};
@@ -89,6 +91,7 @@ fn count_newlines(s: &str) -> usize {
 }
 
 // FIXME: async fn(&str) doesn't currently work with wasm_bindgen: https://stackoverflow.com/a/63655324/78204
+#[cfg(feature = "winit")]
 #[wasm_bindgen]
 pub async fn create_renderer(
     width: u32,
@@ -174,6 +177,7 @@ impl WgpuToyRenderer {
                     self.wgpu
                         .surface
                         .configure(&self.wgpu.device, &self.wgpu.surface_config);
+                    #[cfg(feature = "winit")]
                     self.wgpu.window.request_redraw();
                 }
                 SurfaceError::OutOfMemory => log::error!("Out of GPU Memory!"),
