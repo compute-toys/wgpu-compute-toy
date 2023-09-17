@@ -10,6 +10,7 @@ use context::WgpuContext;
 use lazy_regex::regex;
 use num::Integer;
 use pp::{SourceMap, WGSLError};
+use wgpu::{Maintain, SubmissionIndex};
 use std::collections::HashMap;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -156,7 +157,8 @@ impl WgpuToyRenderer {
                 SurfaceError::Timeout => log::warn!("Surface Timeout"),
             },
             Ok(f) => {
-                let staging_buffer = self.render_to(f);
+                let (staging_buffer, _) = self.render_to(&f);
+                f.present();
                 wasm_bindgen_futures::spawn_local(Self::postrender(
                     staging_buffer,
                     self.screen_width * self.screen_height,
@@ -184,7 +186,8 @@ impl WgpuToyRenderer {
                 SurfaceError::Timeout => log::warn!("Surface Timeout"),
             },
             Ok(f) => {
-                let staging_buffer = self.render_to(f);
+                let (staging_buffer, _) = self.render_to(&f);
+                f.present();
                 Self::postrender(
                     staging_buffer,
                     self.screen_width * self.screen_height,
@@ -195,7 +198,7 @@ impl WgpuToyRenderer {
         }
     }
 
-    fn render_to(&mut self, frame: wgpu::SurfaceTexture) -> Option<wgpu::Buffer> {
+    pub fn render_to(&mut self, frame: &wgpu::SurfaceTexture) -> (Option<wgpu::Buffer>, SubmissionIndex) {
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
         self.bindings.stage(&self.wgpu.queue);
         if self.bindings.time.host.frame % STATS_PERIOD == 0 {
@@ -305,9 +308,9 @@ impl WgpuToyRenderer {
             &mut encoder,
             &frame.texture.create_view(&Default::default()),
         );
-        self.wgpu.queue.submit(Some(encoder.finish()));
-        frame.present();
-        staging_buffer
+
+        let i = self.wgpu.queue.submit(Some(encoder.finish()));
+        (staging_buffer, i)
     }
 
     async fn postrender(
