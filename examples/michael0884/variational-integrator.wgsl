@@ -2,18 +2,13 @@
 
 #define LENGTH 256
 
-struct SimData
-{
-    data: array<array<float, LENGTH>,2>,
-}
-
-#storage sim SimData
+#storage sim_data array<array<float, LENGTH>, 2>
 
 #define IN_BUF (time.frame%2u)
 #define OUT_BUF ((time.frame+1u)%2u)
 
-fn Load(i: uint)  -> float     { return sim.data[IN_BUF][i];  }
-fn Store(i: uint, data: float) { sim.data[OUT_BUF][i] = data; }
+fn Load(i: uint)  -> float     { return sim_data[IN_BUF][i];  }
+fn Store(i: uint, data: float) { sim_data[OUT_BUF][i] = data; }
 
 fn sdSegment(p: float2, a: float2, b: float2) -> float
 {
