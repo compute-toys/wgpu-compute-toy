@@ -280,7 +280,7 @@ impl Bindings {
             },
             mouse: BufferBinding {
                 host: Mouse {
-                    pos: [0, 0],
+                    pos: [width / 2, height / 2],
                     click: 0,
                 },
                 serialise: Box::new(|h| bytemuck::bytes_of(h).to_vec()),
