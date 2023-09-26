@@ -180,13 +180,14 @@ impl Preprocessor {
                     }
                     self.defines.insert(l.to_string(), r);
                 }
-                ["#storage", name, ty] => {
+                ["#storage", name, ref types @ ..] => {
                     if self.storage_count >= 2 {
                         return Err(WGSLError::new(
                             "Only two storage buffers are currently supported".to_string(),
                             n,
                         ));
                     }
+                    let ty = types.join(" ");
                     self.source.push_line(
                         &format!(
                             "@group(0) @binding({}) var<storage,read_write> {name}: {ty};",
