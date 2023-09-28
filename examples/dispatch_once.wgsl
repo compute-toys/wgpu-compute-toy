@@ -183,7 +183,7 @@ fn lenna(fc: vec2f, res: vec2f) -> f32 {
 }
 
 @compute @workgroup_size(16, 16)
-#run_once initialization
+#dispatch_once initialization
 fn initialization(@builtin(global_invocation_id) gid: vec3u) {
     let res = textureDimensions(screen);
 	if (gid.x >= res.x || gid.y >= res.y) { return; }

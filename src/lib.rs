@@ -57,7 +57,7 @@ struct ComputePipeline {
     name: String,
     workgroup_size: [u32; 3],
     workgroup_count: Option<[u32; 3]>,
-    run_once: bool,
+    dispatch_once: bool,
     dispatch_count: u32,
     pipeline: wgpu::ComputePipeline,
 }
@@ -237,8 +237,8 @@ impl WgpuToyRenderer {
         }
         let mut dispatch_counter = 0;
         for (pass_index, p) in self.compute_pipelines.iter().enumerate() {
-            for i in 0..p.dispatch_count {
-                if !p.run_once || self.bindings.time.host.frame == 0 {
+            if !p.dispatch_once || self.bindings.time.host.frame == 0 {
+                for i in 0..p.dispatch_count {
                     let mut compute_pass = encoder.begin_compute_pass(&Default::default());
                     if let Some(q) = &self.query_set {
                         compute_pass.write_timestamp(q, 2 * pass_index as u32);
@@ -549,7 +549,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                 name: entry_point.0.clone(),
                 workgroup_size: entry_point.1,
                 workgroup_count: source.workgroup_count.get(&entry_point.0).cloned(),
-                run_once: *source.run_once.get(&entry_point.0).unwrap_or(&false),
+                dispatch_once: *source.dispatch_once.get(&entry_point.0).unwrap_or(&false),
                 dispatch_count: *source.dispatch_count.get(&entry_point.0).unwrap_or(&1),
                 pipeline: self.wgpu.device.create_compute_pipeline(
                     &wgpu::ComputePipelineDescriptor {
