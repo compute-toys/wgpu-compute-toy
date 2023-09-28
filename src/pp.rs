@@ -42,6 +42,8 @@ pub struct SourceMap {
     #[wasm_bindgen(skip)]
     pub workgroup_count: HashMap<String, [u32; 3]>,
     #[wasm_bindgen(skip)]
+    pub run_once: HashMap<String, bool>,
+    #[wasm_bindgen(skip)]
     pub dispatch_count: HashMap<String, u32>,
     #[wasm_bindgen(skip)]
     pub assert_map: Vec<usize>,
@@ -55,6 +57,7 @@ impl SourceMap {
             source: String::new(),
             map: vec![0],
             workgroup_count: HashMap::new(),
+            run_once: HashMap::new(),
             dispatch_count: HashMap::new(),
             assert_map: vec![],
             user_data: indexmap::IndexMap::from([("_dummy".into(), vec![0])]),
@@ -163,9 +166,12 @@ impl Preprocessor {
                         [parse_u32(x, n)?, parse_u32(y, n)?, parse_u32(z, n)?],
                     );
                 }
+                ["#run_once", name] => {
+                    self.source.run_once
+                        .insert(name.to_string(), true);
+                }
                 ["#dispatch_count", name, x] => {
-                    self.source
-                        .dispatch_count
+                    self.source.dispatch_count
                         .insert(name.to_string(), parse_u32(x, n)?);
                 }
                 ["#define", ..] => {

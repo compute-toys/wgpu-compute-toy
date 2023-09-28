@@ -57,6 +57,7 @@ struct ComputePipeline {
     name: String,
     workgroup_size: [u32; 3],
     workgroup_count: Option<[u32; 3]>,
+    run_once: bool,
     dispatch_count: u32,
     pipeline: wgpu::ComputePipeline,
 }
@@ -237,55 +238,57 @@ impl WgpuToyRenderer {
         let mut dispatch_counter = 0;
         for (pass_index, p) in self.compute_pipelines.iter().enumerate() {
             for i in 0..p.dispatch_count {
-                let mut compute_pass = encoder.begin_compute_pass(&Default::default());
-                if let Some(q) = &self.query_set {
-                    compute_pass.write_timestamp(q, 2 * pass_index as u32);
+                if !p.run_once || self.bindings.time.host.frame == 0 {
+                    let mut compute_pass = encoder.begin_compute_pass(&Default::default());
+                    if let Some(q) = &self.query_set {
+                        compute_pass.write_timestamp(q, 2 * pass_index as u32);
+                    }
+                    let workgroup_count = p.workgroup_count.unwrap_or([
+                        self.screen_width.div_ceil(&p.workgroup_size[0]),
+                        self.screen_height.div_ceil(&p.workgroup_size[1]),
+                        1,
+                    ]);
+                    compute_pass.set_pipeline(&p.pipeline);
+                    self.wgpu.queue.write_buffer(
+                        self.bindings.dispatch_info.buffer(),
+                        bind::OFFSET_ALIGNMENT as u64 * dispatch_counter,
+                        bytemuck::bytes_of(&i),
+                    );
+                    compute_pass.set_bind_group(
+                        0,
+                        &self.compute_bind_group,
+                        &[bind::OFFSET_ALIGNMENT as u32 * dispatch_counter as u32],
+                    );
+                    dispatch_counter += 1;
+                    compute_pass.dispatch_workgroups(
+                        workgroup_count[0],
+                        workgroup_count[1],
+                        workgroup_count[2],
+                    );
+                    if let Some(q) = &self.query_set {
+                        compute_pass.write_timestamp(q, 2 * pass_index as u32 + 1);
+                    }
+                    drop(compute_pass);
+                    encoder.copy_texture_to_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: self.bindings.tex_write.texture(),
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::ImageCopyTexture {
+                            texture: self.bindings.tex_read.texture(),
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::Extent3d {
+                            width: self.screen_width,
+                            height: self.screen_height,
+                            depth_or_array_layers: 4,
+                        },
+                    );
                 }
-                let workgroup_count = p.workgroup_count.unwrap_or([
-                    self.screen_width.div_ceil(&p.workgroup_size[0]),
-                    self.screen_height.div_ceil(&p.workgroup_size[1]),
-                    1,
-                ]);
-                compute_pass.set_pipeline(&p.pipeline);
-                self.wgpu.queue.write_buffer(
-                    self.bindings.dispatch_info.buffer(),
-                    bind::OFFSET_ALIGNMENT as u64 * dispatch_counter,
-                    bytemuck::bytes_of(&i),
-                );
-                compute_pass.set_bind_group(
-                    0,
-                    &self.compute_bind_group,
-                    &[bind::OFFSET_ALIGNMENT as u32 * dispatch_counter as u32],
-                );
-                dispatch_counter += 1;
-                compute_pass.dispatch_workgroups(
-                    workgroup_count[0],
-                    workgroup_count[1],
-                    workgroup_count[2],
-                );
-                if let Some(q) = &self.query_set {
-                    compute_pass.write_timestamp(q, 2 * pass_index as u32 + 1);
-                }
-                drop(compute_pass);
-                encoder.copy_texture_to_texture(
-                    wgpu::ImageCopyTexture {
-                        texture: self.bindings.tex_write.texture(),
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    wgpu::ImageCopyTexture {
-                        texture: self.bindings.tex_read.texture(),
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    wgpu::Extent3d {
-                        width: self.screen_width,
-                        height: self.screen_height,
-                        depth_or_array_layers: 4,
-                    },
-                );
             }
         }
         let mut staging_buffer = None;
@@ -546,6 +549,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                 name: entry_point.0.clone(),
                 workgroup_size: entry_point.1,
                 workgroup_count: source.workgroup_count.get(&entry_point.0).cloned(),
+                run_once: *source.run_once.get(&entry_point.0).unwrap_or(&false),
                 dispatch_count: *source.dispatch_count.get(&entry_point.0).unwrap_or(&1),
                 pipeline: self.wgpu.device.create_compute_pipeline(
                     &wgpu::ComputePipelineDescriptor {
