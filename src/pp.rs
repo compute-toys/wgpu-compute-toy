@@ -167,11 +167,11 @@ impl Preprocessor {
                     );
                 }
                 ["#dispatch_once", name] => {
-                    self.source.dispatch_once
-                        .insert(name.to_string(), true);
+                    self.source.dispatch_once.insert(name.to_string(), true);
                 }
                 ["#dispatch_count", name, x] => {
-                    self.source.dispatch_count
+                    self.source
+                        .dispatch_count
                         .insert(name.to_string(), parse_u32(x, n)?);
                 }
                 ["#define", ..] => {

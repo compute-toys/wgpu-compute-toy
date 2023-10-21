@@ -8,13 +8,11 @@ mod utils;
 use context::init_wgpu;
 use context::WgpuContext;
 use lazy_regex::regex;
-use num::Integer;
 use pp::{SourceMap, WGSLError};
 use std::collections::HashMap;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
-use wgpu::{Maintain, SubmissionIndex};
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -203,14 +201,14 @@ impl WgpuToyRenderer {
     pub fn render_to_surface(
         &mut self,
         frame: &wgpu::SurfaceTexture,
-    ) -> (Option<wgpu::Buffer>, SubmissionIndex) {
+    ) -> (Option<wgpu::Buffer>, wgpu::SubmissionIndex) {
         self.render_to(frame)
     }
 
     fn render_to(
         &mut self,
         frame: &wgpu::SurfaceTexture,
-    ) -> (Option<wgpu::Buffer>, SubmissionIndex) {
+    ) -> (Option<wgpu::Buffer>, wgpu::SubmissionIndex) {
         let mut encoder = self.wgpu.device.create_command_encoder(&Default::default());
         self.bindings.stage(&self.wgpu.queue);
         if self.bindings.time.host.frame % STATS_PERIOD == 0 {
@@ -244,8 +242,8 @@ impl WgpuToyRenderer {
                         compute_pass.write_timestamp(q, 2 * pass_index as u32);
                     }
                     let workgroup_count = p.workgroup_count.unwrap_or([
-                        self.screen_width.div_ceil(&p.workgroup_size[0]),
-                        self.screen_height.div_ceil(&p.workgroup_size[1]),
+                        self.screen_width.div_ceil(p.workgroup_size[0]),
+                        self.screen_height.div_ceil(p.workgroup_size[1]),
                         1,
                     ]);
                     compute_pass.set_pipeline(&p.pipeline);

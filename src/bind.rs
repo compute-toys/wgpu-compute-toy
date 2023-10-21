@@ -1,7 +1,6 @@
 use crate::WgpuContext;
 use bitvec::prelude::*;
 use itertools::Itertools;
-use num::Integer;
 use std::mem::size_of;
 
 const NUM_KEYCODES: usize = 256;
@@ -162,7 +161,7 @@ impl Drop for Bindings {
 
 fn uniform_buffer_size<T>() -> u64 {
     let size = size_of::<T>() as u64;
-    size.div_ceil(&16) * 16
+    size.div_ceil(16) * 16
 }
 
 impl Bindings {
