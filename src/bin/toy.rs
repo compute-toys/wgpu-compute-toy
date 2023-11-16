@@ -1,91 +1,37 @@
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    #[cfg(not(feature = "winit"))]
+    #[cfg(any(target_arch = "wasm32", not(feature = "winit")))]
     return Err("must be compiled with winit feature to run".into());
 
-    #[cfg(feature = "winit")]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
     return winit::main();
 }
 
-#[cfg(feature = "winit")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
 mod winit {
-    use serde::{Deserialize, Serialize};
     use std::error::Error;
     use wgputoy::context::init_wgpu;
+    use wgputoy::shader::{FolderLoader, WebLoader, load_shader};
     use wgputoy::WgpuToyRenderer;
 
-    #[derive(Serialize, Deserialize, Debug)]
-    #[serde(rename_all = "camelCase")]
-    struct ShaderMeta {
-        uniforms: Vec<Uniform>,
-        textures: Vec<Texture>,
-        #[serde(default)]
-        float32_enabled: bool,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct Uniform {
-        name: String,
-        value: f32,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct Texture {
-        img: String,
-    }
-
     async fn init() -> Result<WgpuToyRenderer, Box<dyn Error>> {
+        let name = if std::env::args().len() > 1 {
+            std::env::args().nth(1).unwrap()
+        } else {
+            "default".to_string()
+        };
+
+        let source_loader = FolderLoader::new("./examples".to_string());
+        let texture_loader = WebLoader::new();
+
+        let shader = load_shader(&source_loader, &texture_loader, &name)?;
+
         let wgpu = init_wgpu(1280, 720, "").await?;
         let mut wgputoy = WgpuToyRenderer::new(wgpu);
 
-        let filename = if std::env::args().len() > 1 {
-            std::env::args().nth(1).unwrap()
-        } else {
-            "examples/default.wgsl".to_string()
-        };
-        let shader = std::fs::read_to_string(&filename)?;
+        wgputoy.load_shader(shader).await?;
 
-        let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-            .with(reqwest_middleware_cache::Cache {
-                mode: reqwest_middleware_cache::CacheMode::Default,
-                cache_manager: reqwest_middleware_cache::managers::CACacheManager::default(),
-            })
-            .build();
-
-        if let Ok(json) = std::fs::read_to_string(std::format!("{filename}.json")) {
-            let metadata: ShaderMeta = serde_json::from_str(&json)?;
-            println!("{:?}", metadata);
-
-            for (i, texture) in metadata.textures.iter().enumerate() {
-                let url = if texture.img.starts_with("http") {
-                    texture.img.clone()
-                } else {
-                    std::format!("https://compute.toys/{}", texture.img)
-                };
-                let resp = client.get(&url).send().await?;
-                let img = resp.bytes().await?.to_vec();
-                if texture.img.ends_with(".hdr") {
-                    wgputoy.load_channel_hdr(i, &img)?;
-                } else {
-                    wgputoy.load_channel(i, &img);
-                }
-            }
-
-            let uniform_names: Vec<String> =
-                metadata.uniforms.iter().map(|u| u.name.clone()).collect();
-            let uniform_values: Vec<f32> = metadata.uniforms.iter().map(|u| u.value).collect();
-            if !uniform_names.is_empty() {
-                wgputoy.set_custom_floats(uniform_names, uniform_values);
-            }
-
-            wgputoy.set_pass_f32(metadata.float32_enabled);
-        }
-
-        if let Some(source) = wgputoy.preprocess_async(&shader).await {
-            println!("{}", source.source);
-            wgputoy.compile(source);
-        }
         Ok(wgputoy)
     }
 
@@ -139,7 +85,5 @@ mod winit {
                 _ => (),
             }
         });
-
-        Ok(())
     }
 }

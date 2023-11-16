@@ -30,15 +30,15 @@ pub fn parse_u32(value: &str, line: usize) -> Result<u32, WGSLError> {
     )))
 }
 
-#[cfg(target_arch = "wasm32")]
-#[cached]
 pub async fn fetch_include(name: String) -> Option<String> {
     let url = format!("https://compute-toys.github.io/include/{name}.wgsl");
+    fetch(url).await
+}
 
-    #[cfg(target_arch = "wasm32")]
+#[cfg(target_arch = "wasm32")]
+#[cached]
+pub async fn fetch(url: String) -> Option<String> {
     let resp = gloo_net::http::Request::get(&url).send().await.ok()?;
-    #[cfg(not(target_arch = "wasm32"))]
-    let resp = reqwest::get(&url).await.ok()?;
 
     if resp.status() == 200 {
         resp.text().await.ok()
@@ -48,9 +48,14 @@ pub async fn fetch_include(name: String) -> Option<String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_include(name: String) -> Option<String> {
-    let filename = format!("./include/{name}.wgsl");
-    std::fs::read_to_string(filename).ok()
+pub async fn fetch(url: String) -> Option<String> {
+    let resp = reqwest::get(&url).await.ok()?;
+
+    if resp.status() == 200 {
+        resp.text().await.ok()
+    } else {
+        None
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
