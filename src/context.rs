@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 #[cfg(target_arch = "wasm32")]
 use raw_window_handle::{
-    HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, WebDisplayHandle,
-    WebWindowHandle,
+    DisplayHandle, HasDisplayHandle, HasWindowHandle, WebCanvasWindowHandle, WebDisplayHandle,
+    WindowHandle,
 };
 
 pub struct WgpuContext {
@@ -19,33 +19,21 @@ pub struct WgpuContext {
 
 #[cfg(target_arch = "wasm32")]
 struct CanvasWindow {
-    id: u32,
+    handle: WebCanvasWindowHandle,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl HasWindowHandle for CanvasWindow {
-    fn window_handle(
-        &self,
-    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
-        let window_handle = WebWindowHandle::new(self.id);
-        unsafe {
-            Ok(raw_window_handle::WindowHandle::borrow_raw(
-                RawWindowHandle::Web(window_handle),
-            ))
-        }
+    fn window_handle(&self) -> Result<WindowHandle<'_>, raw_window_handle::HandleError> {
+        unsafe { Ok(WindowHandle::borrow_raw(self.handle.into())) }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl HasDisplayHandle for CanvasWindow {
-    fn display_handle(
-        &self,
-    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
-        unsafe {
-            Ok(raw_window_handle::DisplayHandle::borrow_raw(
-                RawDisplayHandle::Web(WebDisplayHandle::new()),
-            ))
-        }
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, raw_window_handle::HandleError> {
+        // FIXME: Use raw_window_handle::DisplayHandle::<'static>::web() once a new version of raw_window_handle is released
+        unsafe { Ok(DisplayHandle::borrow_raw(WebDisplayHandle::new().into())) }
     }
 }
 
@@ -59,7 +47,7 @@ fn init_window(bind_id: &str) -> Result<CanvasWindow, Box<dyn std::error::Error>
     let element = doc
         .get_element_by_id(bind_id)
         .ok_or(format!("cannot find element {bind_id}"))?;
-    use wasm_bindgen::JsCast;
+    use wasm_bindgen::{JsCast, JsValue};
     let canvas = element
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .or(Err("cannot cast to canvas"))?;
@@ -67,10 +55,10 @@ fn init_window(bind_id: &str) -> Result<CanvasWindow, Box<dyn std::error::Error>
         .get_context("webgpu")
         .or(Err("no webgpu"))?
         .ok_or("no webgpu")?;
-    canvas
-        .set_attribute("data-raw-handle", "42")
-        .or(Err("cannot set attribute"))?;
-    Ok(CanvasWindow { id: 42 })
+    let canvas_js_value: &JsValue = &canvas;
+    Ok(CanvasWindow {
+        handle: WebCanvasWindowHandle::from_wasm_bindgen_0_2(canvas_js_value),
+    })
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]

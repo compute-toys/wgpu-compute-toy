@@ -2149,6 +2149,9 @@ name = "raw-window-handle"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42a9830a0e1b9fb145ebb365b8bc4ccd75f290f98c0247deafbbe2c75cefb544"
+dependencies = [
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "redox_syscall"
