@@ -412,7 +412,7 @@ fn keyDown(keycode: uint) -> bool {
     return ((_keyboard[keycode / 128u][(keycode % 128u) / 32u] >> (keycode % 32u)) & 1u) == 1u;
 }
 
-fn assert(index: int, success: bool) {
+fn assert_toy(index: int, success: bool) {
     if (!success) {
         atomicAdd(&_assert_counts[index], 1u);
     }

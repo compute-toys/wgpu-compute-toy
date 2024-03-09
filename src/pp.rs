@@ -212,7 +212,7 @@ impl Preprocessor {
                     }
                     let pred = counters.join(" ");
                     self.source
-                        .push_line(&format!("assert({}, {pred});", self.assert_count), n);
+                        .push_line(&format!("assert_toy({}, {pred});", self.assert_count), n);
                     self.source.assert_map.push(n);
                     self.assert_count += 1;
                 }
