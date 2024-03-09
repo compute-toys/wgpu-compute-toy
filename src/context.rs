@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use wgpu;
 
 #[cfg(target_arch = "wasm32")]
 use raw_window_handle::{
@@ -100,7 +99,8 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
 
     let surface = unsafe {
         instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).unwrap())
-    }.map_err(|e| e.to_string())?;
+    }
+    .map_err(|e| e.to_string())?;
 
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {

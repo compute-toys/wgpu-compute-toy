@@ -14,21 +14,20 @@ winit = ["dep:winit"]
 [dependencies]
 wasm-bindgen = "0.2.84"
 wasm-bindgen-futures = "0.4.31"
-
 pollster = "0.3.0"
 bytemuck = { version = "1.9.1", features = ["derive"] }
 log = "0.4.17"
-env_logger = "0.10.0"
+env_logger = "0.11.3"
 num = "0.4.0"
 regex = "1.5.6"
 lazy_static = "1.4.0"
 bitvec = "1.0.0"
-lazy-regex = "2.3.0"
-itertools = "0.10.3"
+lazy-regex = "3.1.0"
+itertools = "0.12.1"
 futures-intrusive = "0.5.0"
 async-recursion = "1.0.0"
 snailquote = "0.3.1"
-indexmap = "1.9.3"
+indexmap = "2.2.5"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
@@ -47,21 +46,21 @@ wee_alloc = { version = "0.4.5", optional = true }
 console_log = "1.0.0"
 js-sys = "0.3.57"
 web-sys = "0.3.57"
-gloo-utils = "0.1.4"
-gloo-net = "0.2.1"
-raw-window-handle = "0.5.2"
+gloo-utils = "0.2.0"
+gloo-net = "0.5.0"
+raw-window-handle = "0.6.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = "0.11.16"
-reqwest-middleware = "0.1"
-reqwest-middleware-cache = "0.1"
+reqwest-middleware = "0.2.4"
+http-cache-reqwest = "0.13.0"
 tokio = { version = "1.27.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-winit = { version = "0.29.13", optional = true }
+winit = { version = "0.29.14", optional = true }
 
 [dependencies.wgpu]
-version = "0.19.0"
+version = "0.19.3"
 
 [dependencies.image]
 version = "0.24.2"
@@ -73,9 +72,9 @@ version = "0.1.12"
 features = ["wasm-bindgen"]
 
 [dependencies.cached]
-version = "0.43.0"
+version = "0.49.2"
 default-features = false
-features = ["proc_macro", "wasm"]
+features = ["proc_macro", "wasm", "async"]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.31"

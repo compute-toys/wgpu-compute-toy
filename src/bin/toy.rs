@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(feature = "winit")]
 mod winit {
+    use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
     use serde::{Deserialize, Serialize};
     use std::error::Error;
     use wgputoy::context::init_wgpu;
@@ -18,7 +19,6 @@ mod winit {
         event::{ElementState, Event, WindowEvent},
         event_loop::ControlFlow,
     };
-
 
     #[cfg(not(wasm_platform))]
     use std::time;
@@ -64,10 +64,11 @@ mod winit {
         let shader = std::fs::read_to_string(&filename)?;
 
         let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-            .with(reqwest_middleware_cache::Cache {
-                mode: reqwest_middleware_cache::CacheMode::Default,
-                cache_manager: reqwest_middleware_cache::managers::CACacheManager::default(),
-            })
+            .with(Cache(HttpCache {
+                mode: CacheMode::Default,
+                manager: CACacheManager::default(),
+                options: HttpCacheOptions::default(),
+            }))
             .build();
 
         if let Ok(json) = std::fs::read_to_string(std::format!("{filename}.json")) {
@@ -121,52 +122,50 @@ mod winit {
 
         let mode = Mode::Poll;
         let mut close_requested = false;
-        
-        let _ = event_loop.run(move |event, elwt| {
-            match event {
-                Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::CloseRequested => {
-                        close_requested = true;
-                    }
-                    WindowEvent::CursorMoved { position, .. } => {
-                        wgputoy.set_mouse_pos(
-                            position.x as f32 / screen_size.width as f32,
-                            position.y as f32 / screen_size.height as f32,
-                        );
-                    }
-                    WindowEvent::MouseInput { state, .. } => {
-                        wgputoy.set_mouse_click(state == ElementState::Pressed);
-                    }
-                    WindowEvent::Resized(size) => {
-                        if size.width != 0 && size.height != 0 {
-                            wgputoy.resize(size.width, size.height, 1.);
-                        }
-                    }
-                    WindowEvent::RedrawRequested => {
-                        let time = start_time.elapsed().as_micros() as f32 * 1e-6;
-                        wgputoy.set_time_elapsed(time);
-                        let future = wgputoy.render_async();
-                        runtime.block_on(future);
-                    }
-                    _ => (),
-                },
-                Event::AboutToWait => {
-                    wgputoy.wgpu.window.request_redraw();
 
-                    match mode {
-                        Mode::Poll => {
-                            std::thread::sleep(POLL_SLEEP_TIME);
-                            elwt.set_control_flow(ControlFlow::Poll);
-                        },
-                        _ => ()
-                    };
-
-                    if close_requested {
-                        elwt.exit();
+        let _ = event_loop.run(move |event, elwt| match event {
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => {
+                    close_requested = true;
+                }
+                WindowEvent::CursorMoved { position, .. } => {
+                    wgputoy.set_mouse_pos(
+                        position.x as f32 / screen_size.width as f32,
+                        position.y as f32 / screen_size.height as f32,
+                    );
+                }
+                WindowEvent::MouseInput { state, .. } => {
+                    wgputoy.set_mouse_click(state == ElementState::Pressed);
+                }
+                WindowEvent::Resized(size) => {
+                    if size.width != 0 && size.height != 0 {
+                        wgputoy.resize(size.width, size.height, 1.);
                     }
                 }
+                WindowEvent::RedrawRequested => {
+                    let time = start_time.elapsed().as_micros() as f32 * 1e-6;
+                    wgputoy.set_time_elapsed(time);
+                    let future = wgputoy.render_async();
+                    runtime.block_on(future);
+                }
                 _ => (),
+            },
+            Event::AboutToWait => {
+                wgputoy.wgpu.window.request_redraw();
+
+                match mode {
+                    Mode::Poll => {
+                        std::thread::sleep(POLL_SLEEP_TIME);
+                        elwt.set_control_flow(ControlFlow::Poll);
+                    }
+                    _ => (),
+                };
+
+                if close_requested {
+                    elwt.exit();
+                }
             }
+            _ => (),
         });
         Ok(())
     }

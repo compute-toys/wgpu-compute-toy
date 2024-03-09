@@ -343,7 +343,7 @@ impl WgpuToyRenderer {
                 Some(Ok(())) => {
                     let data = buffer_slice.get_mapped_range();
                     let assertions: &[u32] = bytemuck::cast_slice(&data[0..ASSERTS_SIZE]);
-                    let timestamps: &[u64] = bytemuck::cast_slice(&data[ASSERTS_SIZE..]);
+                    let _timestamps: &[u64] = bytemuck::cast_slice(&data[ASSERTS_SIZE..]);
                     for (i, count) in assertions.iter().enumerate() {
                         if count > &0 {
                             let percent =
