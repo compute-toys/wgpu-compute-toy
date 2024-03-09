@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use wgpu;
 
 #[cfg(target_arch = "wasm32")]
 use raw_window_handle::{
@@ -13,7 +14,7 @@ pub struct WgpuContext {
     pub window: winit::window::Window,
     pub device: Arc<wgpu::Device>,
     pub queue: wgpu::Queue,
-    pub surface: wgpu::Surface,
+    pub surface: wgpu::Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
 }
 
@@ -79,7 +80,7 @@ fn init_window(
 #[cfg(feature = "winit")]
 pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuContext, String> {
     #[cfg(not(target_arch = "wasm32"))]
-    let event_loop = winit::event_loop::EventLoop::new();
+    let event_loop = winit::event_loop::EventLoop::new().map_err(|e| e.to_string())?;
     #[cfg(not(target_arch = "wasm32"))]
     let window = init_window(
         winit::dpi::Size::Physical(winit::dpi::PhysicalSize::new(width, height)),
@@ -93,8 +94,13 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
         dx12_shader_compiler: wgpu::Dx12Compiler::Fxc,
+        flags: wgpu::InstanceFlags::default(),
+        gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
     });
-    let surface = unsafe { instance.create_surface(&window) }.map_err(|e| e.to_string())?;
+
+    let surface = unsafe {
+        instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).unwrap())
+    }.map_err(|e| e.to_string())?;
 
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -108,8 +114,8 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("GPU Device"),
-                features: wgpu::Features::empty(),
-                limits: wgpu::Limits::default(),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
             },
             None,
         )
@@ -128,6 +134,7 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
             surface_format.add_srgb_suffix(),
             surface_format.remove_srgb_suffix(),
         ],
+        desired_maximum_frame_latency: 1,
     };
     surface.configure(&device, &surface_config);
 

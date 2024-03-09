@@ -14,6 +14,23 @@ mod winit {
     use std::error::Error;
     use wgputoy::context::init_wgpu;
     use wgputoy::WgpuToyRenderer;
+    use winit::{
+        event::{ElementState, Event, WindowEvent},
+        event_loop::ControlFlow,
+    };
+
+
+    #[cfg(not(wasm_platform))]
+    use std::time;
+    #[cfg(wasm_platform)]
+    use web_time as time;
+
+    const POLL_SLEEP_TIME: time::Duration = time::Duration::from_millis(100);
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Mode {
+        Poll,
+    }
 
     #[derive(Serialize, Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
@@ -101,45 +118,56 @@ mod winit {
         std::thread::spawn(move || loop {
             device_clone.poll(wgpu::Maintain::Wait);
         });
-        event_loop.run(move |event, _, control_flow| {
-            *control_flow = winit::event_loop::ControlFlow::Poll;
+
+        let mode = Mode::Poll;
+        let mut close_requested = false;
+        
+        let _ = event_loop.run(move |event, elwt| {
             match event {
-                winit::event::Event::RedrawRequested(_) => {
-                    let time = start_time.elapsed().as_micros() as f32 * 1e-6;
-                    wgputoy.set_time_elapsed(time);
-                    let future = wgputoy.render_async();
-                    runtime.block_on(future);
-                }
-                winit::event::Event::MainEventsCleared => {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => {
+                        close_requested = true;
+                    }
+                    WindowEvent::CursorMoved { position, .. } => {
+                        wgputoy.set_mouse_pos(
+                            position.x as f32 / screen_size.width as f32,
+                            position.y as f32 / screen_size.height as f32,
+                        );
+                    }
+                    WindowEvent::MouseInput { state, .. } => {
+                        wgputoy.set_mouse_click(state == ElementState::Pressed);
+                    }
+                    WindowEvent::Resized(size) => {
+                        if size.width != 0 && size.height != 0 {
+                            wgputoy.resize(size.width, size.height, 1.);
+                        }
+                    }
+                    WindowEvent::RedrawRequested => {
+                        let time = start_time.elapsed().as_micros() as f32 * 1e-6;
+                        wgputoy.set_time_elapsed(time);
+                        let future = wgputoy.render_async();
+                        runtime.block_on(future);
+                    }
+                    _ => (),
+                },
+                Event::AboutToWait => {
                     wgputoy.wgpu.window.request_redraw();
-                }
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::CloseRequested,
-                    ..
-                } => *control_flow = winit::event_loop::ControlFlow::Exit,
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::CursorMoved { position, .. },
-                    ..
-                } => wgputoy.set_mouse_pos(
-                    position.x as f32 / screen_size.width as f32,
-                    position.y as f32 / screen_size.height as f32,
-                ),
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::Resized(size),
-                    ..
-                } => {
-                    if size.width != 0 && size.height != 0 {
-                        wgputoy.resize(size.width, size.height, 1.);
+
+                    match mode {
+                        Mode::Poll => {
+                            std::thread::sleep(POLL_SLEEP_TIME);
+                            elwt.set_control_flow(ControlFlow::Poll);
+                        },
+                        _ => ()
+                    };
+
+                    if close_requested {
+                        elwt.exit();
                     }
                 }
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::MouseInput { state, .. },
-                    ..
-                } => wgputoy.set_mouse_click(state == winit::event::ElementState::Pressed),
                 _ => (),
             }
         });
-
         Ok(())
     }
 }
