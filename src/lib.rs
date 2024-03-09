@@ -14,12 +14,6 @@ use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
 
-// When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
-// allocator.
-#[cfg(feature = "wee_alloc")]
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
 struct SuccessCallback(Option<js_sys::Function>);
