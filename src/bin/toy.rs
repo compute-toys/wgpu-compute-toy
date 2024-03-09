@@ -4,11 +4,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(not(feature = "winit"))]
     return Err("must be compiled with winit feature to run".into());
 
-    #[cfg(feature = "winit")]
+    #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
     return winit::main();
+
+    #[cfg(all(feature = "winit", target_arch = "wasm32"))]
+    return Err("winit not supported on wasm target".into());
 }
 
-#[cfg(feature = "winit")]
+#[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
 mod winit {
     use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
     use serde::{Deserialize, Serialize};

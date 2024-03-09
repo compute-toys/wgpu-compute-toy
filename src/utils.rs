@@ -3,7 +3,6 @@ use crate::WGSLError;
 #[cfg(target_arch = "wasm32")]
 use {
     cached::proc_macro::cached, std::future::Future, wasm_bindgen::prelude::*,
-    wasm_bindgen::JsValue,
 };
 
 pub fn set_panic_hook() {

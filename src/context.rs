@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 #[cfg(target_arch = "wasm32")]
 use raw_window_handle::{
-    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle, WebDisplayHandle,
+    HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, WebDisplayHandle,
     WebWindowHandle,
 };
 
@@ -23,18 +23,29 @@ struct CanvasWindow {
 }
 
 #[cfg(target_arch = "wasm32")]
-unsafe impl HasRawWindowHandle for CanvasWindow {
-    fn raw_window_handle(&self) -> RawWindowHandle {
-        let mut window_handle = WebWindowHandle::empty();
-        window_handle.id = self.id;
-        RawWindowHandle::Web(window_handle)
+impl HasWindowHandle for CanvasWindow {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+        let window_handle = WebWindowHandle::new(self.id);
+        unsafe {
+            Ok(raw_window_handle::WindowHandle::borrow_raw(
+                RawWindowHandle::Web(window_handle),
+            ))
+        }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-unsafe impl HasRawDisplayHandle for CanvasWindow {
-    fn raw_display_handle(&self) -> RawDisplayHandle {
-        RawDisplayHandle::Web(WebDisplayHandle::empty())
+impl HasDisplayHandle for CanvasWindow {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        unsafe {
+            Ok(raw_window_handle::DisplayHandle::borrow_raw(
+                RawDisplayHandle::Web(WebDisplayHandle::new()),
+            ))
+        }
     }
 }
 
