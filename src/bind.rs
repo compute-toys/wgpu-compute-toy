@@ -1,6 +1,5 @@
 use crate::WgpuContext;
 use bitvec::prelude::*;
-use itertools::Itertools;
 use std::mem::size_of;
 
 const NUM_KEYCODES: usize = 256;
@@ -596,19 +595,19 @@ impl Bindings {
     }
 
     pub fn to_wgsl(&self) -> String {
-        self.to_vec()
-            .iter()
-            .enumerate()
-            .map(|(i, b)| {
+        // Note: In the future, the Rust standard library might get a intersperse method, see https://github.com/rust-lang/rust/issues/79524
+        itertools::Itertools::intersperse(
+            self.to_vec().iter().enumerate().map(|(i, b)| {
                 let d = b.to_wgsl();
                 if d.is_empty() {
                     String::new()
                 } else {
                     format!("@group(0) @binding({i}) {};", b.to_wgsl())
                 }
-            })
-            .intersperse("\n".to_string())
-            .collect()
+            }),
+            "\n".to_string(),
+        )
+        .collect()
     }
 
     pub fn stage(&self, queue: &wgpu::Queue) {

@@ -4,16 +4,36 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(not(feature = "winit"))]
     return Err("must be compiled with winit feature to run".into());
 
-    #[cfg(feature = "winit")]
+    #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
     return winit::main();
+
+    #[cfg(all(feature = "winit", target_arch = "wasm32"))]
+    return Err("winit not supported on wasm target".into());
 }
 
-#[cfg(feature = "winit")]
+#[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
 mod winit {
+    use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
     use serde::{Deserialize, Serialize};
     use std::error::Error;
     use wgputoy::context::init_wgpu;
     use wgputoy::WgpuToyRenderer;
+    use winit::{
+        event::{ElementState, Event, WindowEvent},
+        event_loop::ControlFlow,
+    };
+
+    #[cfg(not(wasm_platform))]
+    use std::time;
+    #[cfg(wasm_platform)]
+    use web_time as time;
+
+    const POLL_SLEEP_TIME: time::Duration = time::Duration::from_millis(100);
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Mode {
+        Poll,
+    }
 
     #[derive(Serialize, Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
@@ -47,10 +67,11 @@ mod winit {
         let shader = std::fs::read_to_string(&filename)?;
 
         let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-            .with(reqwest_middleware_cache::Cache {
-                mode: reqwest_middleware_cache::CacheMode::Default,
-                cache_manager: reqwest_middleware_cache::managers::CACacheManager::default(),
-            })
+            .with(Cache(HttpCache {
+                mode: CacheMode::Default,
+                manager: CACacheManager::default(),
+                options: HttpCacheOptions::default(),
+            }))
             .build();
 
         if let Ok(json) = std::fs::read_to_string(std::format!("{filename}.json")) {
@@ -101,45 +122,54 @@ mod winit {
         std::thread::spawn(move || loop {
             device_clone.poll(wgpu::Maintain::Wait);
         });
-        event_loop.run(move |event, _, control_flow| {
-            *control_flow = winit::event_loop::ControlFlow::Poll;
-            match event {
-                winit::event::Event::RedrawRequested(_) => {
+
+        let mode = Mode::Poll;
+        let mut close_requested = false;
+
+        let _ = event_loop.run(move |event, elwt| match event {
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => {
+                    close_requested = true;
+                }
+                WindowEvent::CursorMoved { position, .. } => {
+                    wgputoy.set_mouse_pos(
+                        position.x as f32 / screen_size.width as f32,
+                        position.y as f32 / screen_size.height as f32,
+                    );
+                }
+                WindowEvent::MouseInput { state, .. } => {
+                    wgputoy.set_mouse_click(state == ElementState::Pressed);
+                }
+                WindowEvent::Resized(size) => {
+                    if size.width != 0 && size.height != 0 {
+                        wgputoy.resize(size.width, size.height, 1.);
+                    }
+                }
+                WindowEvent::RedrawRequested => {
                     let time = start_time.elapsed().as_micros() as f32 * 1e-6;
                     wgputoy.set_time_elapsed(time);
                     let future = wgputoy.render_async();
                     runtime.block_on(future);
                 }
-                winit::event::Event::MainEventsCleared => {
-                    wgputoy.wgpu.window.request_redraw();
-                }
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::CloseRequested,
-                    ..
-                } => *control_flow = winit::event_loop::ControlFlow::Exit,
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::CursorMoved { position, .. },
-                    ..
-                } => wgputoy.set_mouse_pos(
-                    position.x as f32 / screen_size.width as f32,
-                    position.y as f32 / screen_size.height as f32,
-                ),
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::Resized(size),
-                    ..
-                } => {
-                    if size.width != 0 && size.height != 0 {
-                        wgputoy.resize(size.width, size.height, 1.);
-                    }
-                }
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::MouseInput { state, .. },
-                    ..
-                } => wgputoy.set_mouse_click(state == winit::event::ElementState::Pressed),
                 _ => (),
-            }
-        });
+            },
+            Event::AboutToWait => {
+                wgputoy.wgpu.window.request_redraw();
 
+                match mode {
+                    Mode::Poll => {
+                        std::thread::sleep(POLL_SLEEP_TIME);
+                        elwt.set_control_flow(ControlFlow::Poll);
+                    }
+                    _ => (),
+                };
+
+                if close_requested {
+                    elwt.exit();
+                }
+            }
+            _ => (),
+        });
         Ok(())
     }
 }
