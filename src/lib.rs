@@ -232,9 +232,7 @@ impl WgpuToyRenderer {
             if !p.dispatch_once || self.bindings.time.host.frame == 0 {
                 for i in 0..p.dispatch_count {
                     let mut compute_pass = encoder.begin_compute_pass(&Default::default());
-                    if let Some(q) = &self.query_set {
-                        compute_pass.write_timestamp(q, 2 * pass_index as u32);
-                    }
+                    // if let Some(q) = &self.query_set { compute_pass.write_timestamp(q, 2 * pass_index as u32); }
                     let workgroup_count = p.workgroup_count.unwrap_or([
                         self.screen_width.div_ceil(p.workgroup_size[0]),
                         self.screen_height.div_ceil(p.workgroup_size[1]),
@@ -257,9 +255,7 @@ impl WgpuToyRenderer {
                         workgroup_count[1],
                         workgroup_count[2],
                     );
-                    if let Some(q) = &self.query_set {
-                        compute_pass.write_timestamp(q, 2 * pass_index as u32 + 1);
-                    }
+                    // if let Some(q) = &self.query_set { compute_pass.write_timestamp(q, 2 * pass_index as u32 + 1); }
                     drop(compute_pass);
                     encoder.copy_texture_to_texture(
                         wgpu::ImageCopyTexture {
@@ -337,7 +333,7 @@ impl WgpuToyRenderer {
                 Some(Ok(())) => {
                     let data = buffer_slice.get_mapped_range();
                     let assertions: &[u32] = bytemuck::cast_slice(&data[0..ASSERTS_SIZE]);
-                    let _timestamps: &[u64] = bytemuck::cast_slice(&data[ASSERTS_SIZE..]);
+                    //let _timestamps: &[u64] = bytemuck::cast_slice(&data[ASSERTS_SIZE..]);
                     for (i, count) in assertions.iter().enumerate() {
                         if count > &0 {
                             let percent =
@@ -553,24 +549,12 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                 ),
             })
             .collect();
-        self.query_set = if !self
-            .wgpu
-            .device
-            .features()
-            .contains(wgpu::Features::TIMESTAMP_QUERY)
-        {
-            None
-        } else {
-            Some(
-                self.wgpu
-                    .device
-                    .create_query_set(&wgpu::QuerySetDescriptor {
-                        label: None,
-                        count: 2 * self.compute_pipelines.len() as u32,
-                        ty: wgpu::QueryType::Timestamp,
-                    }),
-            )
-        };
+        // self.query_set = if !self.wgpu.device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+        //     None
+        // } else {
+        //     Some(self.wgpu.device.create_query_set(&wgpu::QuerySetDescriptor {label: None,
+        //          count: 2 * self.compute_pipelines.len() as u32, ty: wgpu::QueryType::Timestamp,
+        // }),)};
         self.bindings.user_data.host = source.user_data.clone();
         log::info!(
             "Shader compiled in {}s",

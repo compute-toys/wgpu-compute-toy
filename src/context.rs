@@ -109,11 +109,15 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
         })
         .await
         .ok_or("unable to create adapter")?;
+    
+    log::info!("adapter.limits = {:#?}", adapter.features());
+    log::info!("adapter.limits = {:#?}", adapter.limits());
+    
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("GPU Device"),
-                required_features: adapter.features(),
+                required_features: wgpu::Features::empty(),// | adapter.features(),
                 required_limits: wgpu::Limits::default(),
             },
             None,
@@ -137,7 +141,6 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
     };
     surface.configure(&device, &surface_config);
 
-    log::info!("adapter.limits = {:#?}", adapter.limits());
     Ok(WgpuContext {
         #[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
         event_loop: Some(event_loop),
