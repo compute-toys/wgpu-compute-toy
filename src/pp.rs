@@ -36,6 +36,8 @@ impl WGSLError {
 #[wasm_bindgen]
 pub struct SourceMap {
     #[wasm_bindgen(skip)]
+    pub extensions: String,
+    #[wasm_bindgen(skip)]
     pub source: String,
     #[wasm_bindgen(skip)]
     pub map: Vec<usize>,
@@ -54,6 +56,7 @@ pub struct SourceMap {
 impl SourceMap {
     pub fn new() -> Self {
         Self {
+            extensions: String::new(),
             source: String::new(),
             map: vec![0],
             workgroup_count: HashMap::new(),
@@ -81,7 +84,7 @@ pub struct Preprocessor {
     source: SourceMap,
     storage_count: usize,
     assert_count: usize,
-    enable_strings: bool,
+    special_strings: bool,
 }
 
 static RE_COMMENT: Lazy<Regex> = lazy_regex!(r"(//.*|(?s:/\*.*?\*/))");
@@ -103,7 +106,7 @@ impl Preprocessor {
             source: SourceMap::new(),
             storage_count: 0,
             assert_count: 0,
-            enable_strings: false,
+            special_strings: false,
         }
     }
 
@@ -129,7 +132,11 @@ impl Preprocessor {
     #[async_recursion(?Send)]
     async fn process_line(&mut self, line_orig: &str, n: usize) -> Result<(), WGSLError> {
         let mut line = self.subst_defines(line_orig);
-        if line.trim_start().starts_with('#') {
+        if line.trim_start().starts_with("enable") {
+            line = RE_COMMENT.replace(&line, "").to_string();
+            self.source.extensions.push_str(&line);
+            self.source.extensions.push('\n');
+        } else if line.trim_start().starts_with('#') {
             line = RE_COMMENT.replace(&line, "").to_string();
             let tokens: Vec<&str> = line.trim().split(' ').collect();
             match tokens[..] {
@@ -145,7 +152,7 @@ impl Preprocessor {
                             Some(cap) => {
                                 let path = &cap[1];
                                 if path == "string" {
-                                    self.enable_strings = true;
+                                    self.special_strings = true;
                                 }
                                 fetch_include(format!("std/{path}")).await
                             }
@@ -242,7 +249,7 @@ impl Preprocessor {
                 }
             }
         } else {
-            if self.enable_strings {
+            if self.special_strings {
                 let mut err = None;
                 line = RE_QUOTES.replace(&line, |caps: &Captures| {
                     if let Ok(s) = snailquote::unescape(&caps[0]) {

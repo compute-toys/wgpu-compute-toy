@@ -473,7 +473,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
 
     pub fn compile(&mut self, source: SourceMap) {
         let now = instant::Instant::now();
-        let prelude = self.prelude(); // prelude must be generated after preprocessor has run
+        let prelude = format!("{}{}", source.extensions, self.prelude());
 
         // FIXME: remove pending resolution of this issue: https://github.com/gfx-rs/wgpu/issues/2130
         let prelude_len = count_newlines(&prelude);
