@@ -24,10 +24,10 @@ fn main_image(@builtin(global_invocation_id) id: uint3) {
     col.z = log(col.z);
     if (time.frame % 199u == 0u) { col.w = col.x; }
 
-    assert(0, !isinf(col.x));
-    assert(1, isfinite(col.y));
-    assert(2, !isnan(col.z));
-    assert(3, isnormal(col.w));
+    assert_toy(0, !isinf(col.x));
+    assert_toy(1, isfinite(col.y));
+    assert_toy(2, !isnan(col.z));
+    assert_toy(3, isnormal(col.w));
 
     // Output to screen (linear colour space)
     textureStore(screen, int2(id.xy), col);
