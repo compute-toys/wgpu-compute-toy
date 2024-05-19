@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 #[cfg(target_arch = "wasm32")]
 use raw_window_handle::{
-    DisplayHandle, HasDisplayHandle, HasWindowHandle, WebCanvasWindowHandle, WebDisplayHandle,
-    WindowHandle,
+    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawWindowHandle,
+    WebDisplayHandle, WebWindowHandle, WindowHandle,
 };
 
 pub struct WgpuContext {
@@ -19,19 +19,23 @@ pub struct WgpuContext {
 
 #[cfg(target_arch = "wasm32")]
 struct CanvasWindow {
-    handle: WebCanvasWindowHandle,
+    id: u32,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl HasWindowHandle for CanvasWindow {
-    fn window_handle(&self) -> Result<WindowHandle<'_>, raw_window_handle::HandleError> {
-        unsafe { Ok(WindowHandle::borrow_raw(self.handle.into())) }
+    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+        unsafe {
+            Ok(WindowHandle::borrow_raw(RawWindowHandle::Web(
+                WebWindowHandle::new(self.id),
+            )))
+        }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl HasDisplayHandle for CanvasWindow {
-    fn display_handle(&self) -> Result<DisplayHandle<'_>, raw_window_handle::HandleError> {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
         // FIXME: Use raw_window_handle::DisplayHandle::<'static>::web() once a new version of raw_window_handle is released
         unsafe { Ok(DisplayHandle::borrow_raw(WebDisplayHandle::new().into())) }
     }
@@ -47,7 +51,7 @@ fn init_window(bind_id: &str) -> Result<CanvasWindow, Box<dyn std::error::Error>
     let element = doc
         .get_element_by_id(bind_id)
         .ok_or(format!("cannot find element {bind_id}"))?;
-    use wasm_bindgen::{JsCast, JsValue};
+    use wasm_bindgen::JsCast;
     let canvas = element
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .or(Err("cannot cast to canvas"))?;
@@ -55,10 +59,10 @@ fn init_window(bind_id: &str) -> Result<CanvasWindow, Box<dyn std::error::Error>
         .get_context("webgpu")
         .or(Err("no webgpu"))?
         .ok_or("no webgpu")?;
-    let canvas_js_value: &JsValue = &canvas;
-    Ok(CanvasWindow {
-        handle: WebCanvasWindowHandle::from_wasm_bindgen_0_2(canvas_js_value),
-    })
+    canvas
+        .set_attribute("data-raw-handle", "42")
+        .or(Err("cannot set attribute"))?;
+    Ok(CanvasWindow { id: 42 })
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "winit"))]
