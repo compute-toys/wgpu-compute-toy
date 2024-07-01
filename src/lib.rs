@@ -20,14 +20,14 @@ struct SuccessCallback(Option<js_sys::Function>);
 
 #[cfg(target_arch = "wasm32")]
 impl SuccessCallback {
-    fn call(&self, entry_points: Vec<String>) {
+    fn call(&self, entry_nodes: Vec<String>) {
         match self.0 {
             None => log::error!("No success callback registered"),
             Some(ref callback) => {
                 let res = callback.call1(
                     &JsValue::NULL,
                     &JsValue::from(
-                        entry_points
+                        entry_nodes
                             .into_iter()
                             .map(JsValue::from)
                             .collect::<js_sys::Array>(),
@@ -452,11 +452,11 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
         s
     }
 
-    fn handle_success(&self, entry_points: Vec<String>) {
+    fn handle_success(&self, entry_nodes: Vec<String>) {
         #[cfg(target_arch = "wasm32")]
-        self.on_success_cb.call(entry_points);
+        self.on_success_cb.call(entry_nodes);
         #[cfg(not(target_arch = "wasm32"))]
-        log::info!("Entry points: {:?}", entry_points);
+        log::info!("Entry points: {:?}", entry_nodes);
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -518,8 +518,8 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
             }));
 
         let wgsl = &(prelude + &source.source);
-        let re_entry_point = regex!(r"(?s)@compute.*?@workgroup_size\((.*?)\).*?fn\s+(\w+)");
-        let entry_points: Vec<(String, [u32; 3])> = re_entry_point
+        let re_entry_node = regex!(r"(?s)@compute.*?@workgroup_size\((.*?)\).*?fn\s+(\w+)");
+        let entry_nodes: Vec<(String, [u32; 3])> = re_entry_node
             .captures_iter(&pp::strip_comments(wgsl))
             .map(|cap| {
                 // TODO: Handle error if failed to parse the capture
@@ -529,8 +529,8 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                 (cap[2].to_owned(), workgroup_size)
             })
             .collect();
-        let entry_point_names = entry_points.iter().map(|t| t.0.clone()).collect();
-        self.handle_success(entry_point_names);
+        let entry_node_names = entry_nodes.iter().map(|t| t.0.clone()).collect();
+        self.handle_success(entry_node_names);
         let compute_shader = self
             .wgpu
             .device
@@ -539,20 +539,20 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                 source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl)),
             });
         self.last_compute_pipelines = Some(take(&mut self.compute_pipelines));
-        self.compute_pipelines = entry_points
+        self.compute_pipelines = entry_nodes
             .iter()
-            .map(|entry_point| ComputePipeline {
-                name: entry_point.0.clone(),
-                workgroup_size: entry_point.1,
-                workgroup_count: source.workgroup_count.get(&entry_point.0).cloned(),
-                dispatch_once: *source.dispatch_once.get(&entry_point.0).unwrap_or(&false),
-                dispatch_count: *source.dispatch_count.get(&entry_point.0).unwrap_or(&1),
+            .map(|entry_node| ComputePipeline {
+                name: entry_node.0.clone(),
+                workgroup_size: entry_node.1,
+                workgroup_count: source.workgroup_count.get(&entry_node.0).cloned(),
+                dispatch_once: *source.dispatch_once.get(&entry_node.0).unwrap_or(&false),
+                dispatch_count: *source.dispatch_count.get(&entry_node.0).unwrap_or(&1),
                 pipeline: self.wgpu.device.create_compute_pipeline(
                     &wgpu::ComputePipelineDescriptor {
                         label: None,
                         layout: Some(&self.compute_pipeline_layout),
                         module: &compute_shader,
-                        entry_point: &entry_point.0,
+                        entry_point: &entry_node.0,
                     },
                 ),
             })

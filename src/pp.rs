@@ -5,6 +5,7 @@ use crate::{
 use async_recursion::async_recursion;
 use itertools::Itertools;
 use lazy_regex::*;
+use lazy_regex::regex_captures;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -44,6 +45,10 @@ pub struct SourceMap {
     #[wasm_bindgen(skip)]
     pub workgroup_count: HashMap<String, [u32; 3]>,
     #[wasm_bindgen(skip)]
+    pub add_to_group: HashMap<String, String>,
+    #[wasm_bindgen(skip)]
+    pub dispatch_group: HashMap<String, u32>,
+    #[wasm_bindgen(skip)]
     pub dispatch_once: HashMap<String, bool>,
     #[wasm_bindgen(skip)]
     pub dispatch_count: HashMap<String, u32>,
@@ -60,6 +65,8 @@ impl SourceMap {
             source: String::new(),
             map: vec![0],
             workgroup_count: HashMap::new(),
+            add_to_group: HashMap::new(),
+            dispatch_group: HashMap::new(),
             dispatch_once: HashMap::new(),
             dispatch_count: HashMap::new(),
             assert_map: vec![],
@@ -124,13 +131,13 @@ impl Preprocessor {
 
     async fn preprocess(&mut self, shader: &str) -> Result<(), WGSLError> {
         for (line, n) in shader.lines().zip(1..) {
-            self.process_line(line, n).await?
+            self.process_line(line, n, shader).await?
         }
         Ok(())
     }
 
     #[async_recursion(?Send)]
-    async fn process_line(&mut self, line_orig: &str, n: usize) -> Result<(), WGSLError> {
+    async fn process_line(&mut self, line_orig: &str, n: usize, shader: &str) -> Result<(), WGSLError> {
         let mut line = self.subst_defines(line_orig);
         if line.trim_start().starts_with("enable") {
             line = RE_COMMENT.replace(&line, "").to_string();
@@ -161,7 +168,7 @@ impl Preprocessor {
                     };
                     if let Some(code) = include {
                         for line in code.lines() {
-                            self.process_line(line, n).await?
+                            self.process_line(line, n, shader).await?
                         }
                     } else {
                         return Err(WGSLError::new(format!("Cannot find include {name}"), n));
@@ -172,6 +179,23 @@ impl Preprocessor {
                         name.to_string(),
                         [parse_u32(x, n)?, parse_u32(y, n)?, parse_u32(z, n)?],
                     );
+                }
+                ["#add_to_group", child, parent] => {
+                    self.source.add_to_group
+                        .insert(child.to_string(), parent.to_string());
+                }
+                ["#dispatch_group", group, count] => {
+                    self.source.dispatch_group.insert(group.to_string(), parse_u32(count, n)?);
+                    let rgx = format!(r"(?s)#dispatch_group\s+{group}\s+\w+.*@compute.*?@workgroup_size\(.*\).*?fn\s+(\w+)(?s)");
+                    // let (_, entry_after) = regex_captures!(rgx, shader);
+
+                    /* if entry_after != null {
+                        // flatten tree and add to queue
+                    } else {
+                        // flatten tree add to queue before*/
+                        let rgx = format!(r"(?s)@compute.*?@workgroup_size\(.*\).*?fn\s+(\w+).*#dispatch_group\s+{group}(?s)");
+                        /*let (_, entry_before) = regex_captures!(rgx, shader);
+                    }*/
                 }
                 ["#dispatch_once", name] => {
                     self.source.dispatch_once.insert(name.to_string(), true);
