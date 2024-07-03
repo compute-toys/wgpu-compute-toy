@@ -9,6 +9,7 @@ use context::init_wgpu;
 use context::WgpuContext;
 use lazy_regex::regex;
 use pp::{SourceMap, WGSLError};
+use wgpu::PipelineCompilationOptions;
 use std::collections::HashMap;
 use std::mem::{size_of, take};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -553,6 +554,7 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                         layout: Some(&self.compute_pipeline_layout),
                         module: &compute_shader,
                         entry_point: &entry_point.0,
+                        compilation_options: PipelineCompilationOptions::default(),
                     },
                 ),
             })
