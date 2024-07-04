@@ -1,3 +1,5 @@
+use wgpu::PipelineCompilationOptions;
+
 use crate::context::WgpuContext;
 
 #[derive(Copy, Clone, Debug)]
@@ -78,6 +80,7 @@ impl Blitter {
                     module: &render_shader,
                     entry_point: "vs_main",
                     buffers: &[],
+                    compilation_options: PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &render_shader,
@@ -92,6 +95,7 @@ impl Blitter {
                         _ => panic!("Blitter: unrecognised conversion from {src_space:?} to {dest_format:?}")
                     },
                     targets: &[Some(dest_format.into())],
+                    compilation_options: PipelineCompilationOptions::default(),
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
