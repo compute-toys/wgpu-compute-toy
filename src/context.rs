@@ -122,7 +122,7 @@ pub async fn init_wgpu(width: u32, height: u32, bind_id: &str) -> Result<WgpuCon
             &wgpu::DeviceDescriptor {
                 label: Some("GPU Device"),
                 required_features: adapter.features(),
-                required_limits: wgpu::Limits::default(),
+                ..Default::default()
             },
             None,
         )
