@@ -78,13 +78,13 @@ impl Blitter {
                 })),
                 vertex: wgpu::VertexState {
                     module: &render_shader,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &render_shader,
-                    entry_point: match (src_space, dest_format) {
+                    entry_point: Some(match (src_space, dest_format) {
                         // FIXME use sRGB viewFormats instead once the API stabilises
                         (ColourSpace::Linear, wgpu::TextureFormat::Bgra8Unorm) => "fs_main_linear_to_srgb",
                         (ColourSpace::Linear, wgpu::TextureFormat::Rgba8Unorm) => "fs_main_linear_to_srgb",
@@ -93,7 +93,7 @@ impl Blitter {
                         (ColourSpace::Linear, wgpu::TextureFormat::Rgba16Float) => "fs_main",
                         (ColourSpace::Rgbe, wgpu::TextureFormat::Rgba16Float) => "fs_main_rgbe_to_linear",
                         _ => panic!("Blitter: unrecognised conversion from {src_space:?} to {dest_format:?}")
-                    },
+                    }),
                     targets: &[Some(dest_format.into())],
                     compilation_options: PipelineCompilationOptions::default(),
                 }),
@@ -101,6 +101,7 @@ impl Blitter {
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
+                cache: None,
             }),
             dest_format,
         }
