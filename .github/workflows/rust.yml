@@ -36,7 +36,7 @@ jobs:
           override: true
           target: wasm32-unknown-unknown
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v1.3.0
+        uses: Swatinem/rust-cache@v2.7.5
       - name: Set up wasm-pack and build
         run: |
           cargo install wasm-pack
