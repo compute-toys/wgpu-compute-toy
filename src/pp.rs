@@ -26,7 +26,7 @@ impl WGSLError {
         #[cfg(target_arch = "wasm32")]
         wgsl_error_handler(summary, row, col);
         #[cfg(not(target_arch = "wasm32"))]
-        panic!("{}:{}: {}", row, col, summary);
+        println!("{}:{}: {}", row, col, summary);
     }
     pub fn submit(&self) {
         Self::handler(&self.summary, self.line, 0)
