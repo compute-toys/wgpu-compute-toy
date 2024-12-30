@@ -15,7 +15,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 mod winit {
     use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
     use serde::{Deserialize, Serialize};
-    use std::error::Error;
+    use std::{
+        error::Error,
+        path::Path,
+        sync::atomic::{AtomicBool, Ordering},
+    };
     use wgputoy::context::init_wgpu;
     use wgputoy::WgpuToyRenderer;
     use winit::{
@@ -56,16 +60,10 @@ mod winit {
         img: String,
     }
 
-    async fn init() -> Result<WgpuToyRenderer, Box<dyn Error>> {
+    async fn init(filename: &str) -> Result<WgpuToyRenderer, Box<dyn Error>> {
         let wgpu = init_wgpu(1280, 720, "").await?;
         let mut wgputoy = WgpuToyRenderer::new(wgpu);
-
-        let filename = if std::env::args().len() > 1 {
-            std::env::args().nth(1).unwrap()
-        } else {
-            "examples/default.wgsl".to_string()
-        };
-        let shader = std::fs::read_to_string(&filename)?;
+        let shader = std::fs::read_to_string(filename)?;
 
         let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
             .with(Cache(HttpCache {
@@ -111,23 +109,12 @@ mod winit {
         Ok(wgputoy)
     }
 
+    static NEEDS_REBUILD: AtomicBool = AtomicBool::new(false);
+
     pub fn main() -> Result<(), Box<dyn Error>> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
-        let mut wgputoy = runtime.block_on(init())?;
-        let screen_size = wgputoy.wgpu.window.inner_size();
-        let event_loop = std::mem::take(&mut wgputoy.wgpu.event_loop).unwrap();
-        let device_clone = wgputoy.wgpu.device.clone();
-        std::thread::spawn(move || loop {
-            device_clone.poll(wgpu::Maintain::Wait);
-        });
-
-        let mode = Mode::Poll;
-        let mut close_requested = false;
-        let mut paused = false;
-        let mut current_instant = std::time::Instant::now();
-        let mut reference_time = 0.0; // to handle pause and resume
 
         let filename = if std::env::args().len() > 1 {
             std::env::args().nth(1).unwrap()
@@ -135,125 +122,148 @@ mod winit {
             "examples/default.wgsl".to_string()
         };
 
-        // for file watching
-        let mut last_modified = std::fs::metadata(&filename)?.modified()?;
-        let mut last_check = std::time::Instant::now();
-        let check_interval = std::time::Duration::from_secs(2);
+        let mut wgputoy = runtime.block_on(init(&filename))?;
+        let screen_size = wgputoy.wgpu.window.inner_size();
+        let event_loop = std::mem::take(&mut wgputoy.wgpu.event_loop).unwrap();
+        let device_clone = wgputoy.wgpu.device.clone();
+        std::thread::spawn(move || loop {
+            device_clone.poll(wgpu::Maintain::Wait);
+            std::thread::yield_now();
+        });
 
-        let _ = event_loop.run(move |event, elwt| match event {
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested
-                | WindowEvent::KeyboardInput {
-                    device_id: _,
-                    event:
-                        KeyEvent {
-                            state: ElementState::Released,
-                            physical_key: PhysicalKey::Code(KeyCode::Escape),
-                            ..
-                        },
-                    ..
-                } => {
-                    close_requested = true;
+        let mut watcher;
+        'watch: {
+            use notify::{Event, RecursiveMode, Result, Watcher};
+
+            let watcher_res = notify::recommended_watcher(|event: Result<Event>| match event {
+                Ok(_) => NEEDS_REBUILD.store(true, Ordering::Relaxed),
+                Err(err) => log::error!("Error watching file: {err}"),
+            });
+
+            watcher = match watcher_res {
+                Ok(watcher) => watcher,
+                Err(err) => {
+                    log::error!("Error creating watcher: {err:?}");
+                    break 'watch;
                 }
-                WindowEvent::KeyboardInput {
-                    device_id: _,
-                    event:
-                        KeyEvent {
-                            state: ElementState::Released,
-                            physical_key: PhysicalKey::Code(KeyCode::Backspace),
-                            ..
-                        },
-                    ..
-                } => {
-                    // reset time
-                    paused = false;
-                    reference_time = 0.0;
-                    current_instant = std::time::Instant::now();
-                    println!("reset time");
+            };
+
+            let path = Path::new(&filename);
+            if let Err(err) = watcher.watch(path, RecursiveMode::NonRecursive) {
+                log::error!("Error watching file: {:?}", err);
+                break 'watch;
+            }
+
+            log::info!("Watching file: {path:?}");
+        }
+
+        let mode = Mode::Poll;
+        let mut close_requested = false;
+        let mut paused = false;
+        let mut current_instant = std::time::Instant::now();
+        let mut reference_time = 0.0; // to handle pause and resume
+
+        let _ = event_loop.run(move |event, elwt| {
+            if NEEDS_REBUILD.swap(false, Ordering::Relaxed) {
+                let shader = std::fs::read_to_string(&filename).unwrap();
+                if let Some(source) = runtime.block_on(wgputoy.preprocess_async(&shader)) {
+                    println!("{}", source.source);
+                    wgputoy.compile(source);
                 }
-                WindowEvent::KeyboardInput {
-                    device_id: _,
-                    event:
-                        KeyEvent {
-                            state: ElementState::Released,
-                            physical_key: PhysicalKey::Code(KeyCode::Space),
-                            ..
-                        },
-                    ..
-                } => {
-                    // toggle pause and reset time
-                    paused = !paused;
-                    if !paused {
+            };
+
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested
+                    | WindowEvent::KeyboardInput {
+                        device_id: _,
+                        event:
+                            KeyEvent {
+                                state: ElementState::Released,
+                                physical_key: PhysicalKey::Code(KeyCode::Escape),
+                                ..
+                            },
+                        ..
+                    } => {
+                        close_requested = true;
+                    }
+                    WindowEvent::KeyboardInput {
+                        device_id: _,
+                        event:
+                            KeyEvent {
+                                state: ElementState::Released,
+                                physical_key: PhysicalKey::Code(KeyCode::Backspace),
+                                ..
+                            },
+                        ..
+                    } => {
+                        // reset time
+                        paused = false;
+                        reference_time = 0.0;
                         current_instant = std::time::Instant::now();
-                    } else {
-                        reference_time = reference_time + current_instant.elapsed().as_secs_f32();
+                        println!("reset time");
                     }
-                }
-                WindowEvent::CursorMoved { position, .. } => {
-                    wgputoy.set_mouse_pos(
-                        position.x as f32 / screen_size.width as f32,
-                        position.y as f32 / screen_size.height as f32,
-                    );
-                }
-                WindowEvent::MouseInput { state, .. } => {
-                    wgputoy.set_mouse_click(state == ElementState::Pressed);
-                }
-                WindowEvent::Resized(size) => {
-                    if size.width != 0 && size.height != 0 {
-                        wgputoy.resize(size.width, size.height, 1.);
-                    }
-                }
-                WindowEvent::RedrawRequested => {
-                    if !paused {
-                        let time = reference_time + current_instant.elapsed().as_secs_f32();
-                        wgputoy.set_time_elapsed(time);
-                    }
-                    let future = wgputoy.render_async();
-                    runtime.block_on(future);
-                }
-                _ => (),
-            },
-            Event::AboutToWait => {
-                // Check for file changes at a specific interval once every second or two is probably enough
-                if last_check.elapsed() >= check_interval {
-                    if let Ok(metadata) = std::fs::metadata(&filename) {
-                        if let Ok(modified) = metadata.modified() {
-                            if modified > last_modified {
-                                println!("file {} changed, reloading shader", filename);
-                                if let Ok(shader) = std::fs::read_to_string(&filename) {
-                                    if let Some(source) =
-                                        runtime.block_on(wgputoy.preprocess_async(&shader))
-                                    {
-                                        println!("{}", source.source);
-                                        wgputoy.compile(source);
-
-                                        // even in paused mode, we want to redraw to see the changes
-                                        wgputoy.wgpu.window.request_redraw();
-                                    }
-                                }
-                                last_modified = modified;
-                            }
+                    WindowEvent::KeyboardInput {
+                        device_id: _,
+                        event:
+                            KeyEvent {
+                                state: ElementState::Released,
+                                physical_key: PhysicalKey::Code(KeyCode::Space),
+                                ..
+                            },
+                        ..
+                    } => {
+                        // toggle pause and reset time
+                        paused = !paused;
+                        if !paused {
+                            current_instant = std::time::Instant::now();
+                        } else {
+                            reference_time =
+                                reference_time + current_instant.elapsed().as_secs_f32();
                         }
                     }
-                    last_check = std::time::Instant::now();
-                }
-
-                if !paused {
-                    wgputoy.wgpu.window.request_redraw();
-                }
-                match mode {
-                    Mode::Poll => {
-                        std::thread::sleep(POLL_SLEEP_TIME);
-                        elwt.set_control_flow(ControlFlow::Poll);
+                    WindowEvent::CursorMoved { position, .. } => {
+                        wgputoy.set_mouse_pos(
+                            position.x as f32 / screen_size.width as f32,
+                            position.y as f32 / screen_size.height as f32,
+                        );
+                    }
+                    WindowEvent::MouseInput { state, .. } => {
+                        wgputoy.set_mouse_click(state == ElementState::Pressed);
+                    }
+                    WindowEvent::Resized(size) => {
+                        if size.width != 0 && size.height != 0 {
+                            wgputoy.resize(size.width, size.height, 1.);
+                        }
+                    }
+                    WindowEvent::RedrawRequested => {
+                        if !paused {
+                            let time = reference_time + current_instant.elapsed().as_secs_f32();
+                            wgputoy.set_time_elapsed(time);
+                        }
+                        let future = wgputoy.render_async();
+                        runtime.block_on(future);
                     }
                     _ => (),
-                };
+                },
+                Event::AboutToWait => {
+                    if !paused {
+                        wgputoy.wgpu.window.request_redraw();
+                    }
+                    match mode {
+                        Mode::Poll => {
+                            std::thread::sleep(POLL_SLEEP_TIME);
+                            elwt.set_control_flow(ControlFlow::Poll);
+                        }
+                        _ => (),
+                    };
 
-                if close_requested {
-                    elwt.exit();
+                    if close_requested {
+                        elwt.exit();
+                    }
                 }
+                _ => (),
             }
-            _ => (),
         });
         Ok(())
     }
