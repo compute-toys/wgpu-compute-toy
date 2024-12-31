@@ -28,18 +28,6 @@ mod winit {
         keyboard::{KeyCode, PhysicalKey},
     };
 
-    #[cfg(not(wasm_platform))]
-    use std::time;
-    #[cfg(wasm_platform)]
-    use web_time as time;
-
-    const POLL_SLEEP_TIME: time::Duration = time::Duration::from_millis(100);
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Mode {
-        Poll,
-    }
-
     #[derive(Serialize, Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct ShaderMeta {
@@ -157,7 +145,6 @@ mod winit {
             log::info!("Watching file: {path:?}");
         }
 
-        let mode = Mode::Poll;
         let mut close_requested = false;
         let mut paused = false;
         let mut current_instant = std::time::Instant::now();
@@ -250,14 +237,6 @@ mod winit {
                     if !paused {
                         wgputoy.wgpu.window.request_redraw();
                     }
-                    match mode {
-                        Mode::Poll => {
-                            std::thread::sleep(POLL_SLEEP_TIME);
-                            elwt.set_control_flow(ControlFlow::Poll);
-                        }
-                        _ => (),
-                    };
-
                     if close_requested {
                         elwt.exit();
                     }
