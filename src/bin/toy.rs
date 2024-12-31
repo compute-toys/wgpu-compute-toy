@@ -188,6 +188,7 @@ mod winit {
                         paused = false;
                         reference_time = 0.0;
                         current_instant = std::time::Instant::now();
+                        wgputoy.reset();
                         println!("reset time");
                     }
                     WindowEvent::KeyboardInput {
