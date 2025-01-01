@@ -513,9 +513,9 @@ fn passSampleLevelBilinearRepeat(pass_index: int, uv: float2, lod: float) -> flo
                             n = sourcemap_clone[n];
                         }
                         WGSLError::handler(summary, n, col);
-                        SHADER_ERROR.store(true, Ordering::SeqCst);
                     }
                 }
+                SHADER_ERROR.store(true, Ordering::SeqCst);
             }));
 
         let wgsl = &(prelude + &source.source);
