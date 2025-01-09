@@ -48,10 +48,15 @@ mod winit {
         img: String,
     }
 
+    const APPLICATION_TITLE: &str = "WgpuToy";
+    const APPLICATION_TITLE_PAUSED: &str = "WgpuToy - Paused";
+
     async fn init(filename: &str) -> Result<WgpuToyRenderer, Box<dyn Error>> {
         let wgpu = init_wgpu(1280, 720, "").await?;
         let mut wgputoy = WgpuToyRenderer::new(wgpu);
         let shader = std::fs::read_to_string(filename)?;
+
+        wgputoy.wgpu.window.set_title(APPLICATION_TITLE);
 
         let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
             .with(Cache(HttpCache {
@@ -121,12 +126,19 @@ mod winit {
 
         let mut watcher;
         'watch: {
-            use notify::{Event, RecursiveMode, Result, Watcher};
+            use notify::{RecursiveMode, Result, Watcher};
 
-            let watcher_res = notify::recommended_watcher(|event: Result<Event>| match event {
-                Ok(_) => NEEDS_REBUILD.store(true, Ordering::Relaxed),
-                Err(err) => log::error!("Error watching file: {err}"),
-            });
+            let event_loop_proxy = event_loop.create_proxy();
+            let watcher_res =
+                notify::recommended_watcher(move |event: Result<notify::Event>| match event {
+                    Ok(_) => {
+                        let res = NEEDS_REBUILD.store(true, Ordering::Relaxed);
+                        // for the event loop to run
+                        event_loop_proxy.send_event(()).unwrap();
+                        res
+                    }
+                    Err(err) => log::error!("Error watching file: {err}"),
+                });
 
             watcher = match watcher_res {
                 Ok(watcher) => watcher,
@@ -154,8 +166,10 @@ mod winit {
             if NEEDS_REBUILD.swap(false, Ordering::Relaxed) {
                 let shader = std::fs::read_to_string(&filename).unwrap();
                 if let Some(source) = runtime.block_on(wgputoy.preprocess_async(&shader)) {
-                    println!("{}", source.source);
+                    // println!("{}", source.source); // commented as it's annoying to have the file source bloat the console, maybe it should be a debug log ?
                     wgputoy.compile(source);
+                    // force redraw to update the shader with the new changes
+                    wgputoy.wgpu.window.request_redraw();
                 }
             };
 
@@ -205,9 +219,11 @@ mod winit {
                         paused = !paused;
                         if !paused {
                             current_instant = std::time::Instant::now();
+                            wgputoy.wgpu.window.set_title(APPLICATION_TITLE);
                         } else {
                             reference_time =
                                 reference_time + current_instant.elapsed().as_secs_f32();
+                            wgputoy.wgpu.window.set_title(APPLICATION_TITLE_PAUSED);
                         }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
