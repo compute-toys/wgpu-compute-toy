@@ -43,7 +43,7 @@ jobs:
           cargo install wasm-pack
           wasm-pack build --release
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wgputoy-wasm
           path: pkg
